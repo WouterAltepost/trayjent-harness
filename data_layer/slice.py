@@ -16,6 +16,7 @@ import os
 import pandas as pd
 
 import config
+from harness.reuse import classify_vix_regime
 
 
 def _parquet_path(ticker: str, timeframe: str) -> str:
@@ -103,20 +104,11 @@ def get_window(ticker: str, timeframe: str, as_of, n_bars: int = None) -> dict:
 
 
 # ── VIX regime, as of T ─────────────────────────────────────────────────
-# Lifted from the live classifier in trading-agent/tools/market_data.py
-# (``fetch_vix``): the <15 / <20 / <30 / 30+ ladder. Pinned by a test
-# (tests/test_slice.py) until the live classifier is extracted into shared
-# code (deferred past Phase 1, per the brief's out-of-scope note).
-def _classify_vix_regime(vix_close: float) -> str:
-    if vix_close < 15:
-        return "low"
-    elif vix_close < 20:
-        return "normal"
-    elif vix_close < 30:
-        return "elevated"
-    return "stressed"
-
-
+# The regime ladder (<15 / <20 / <30 / 30+) is the live classifier, imported
+# via the reuse shim (trading-agent/tools/vix.classify_vix_regime). The private
+# copy that used to live here was deleted in Phase 2 — one source of truth, so a
+# live threshold change can never silently desync the backtest. Still pinned by
+# tests/test_slice.py.
 def get_vix_asof(as_of) -> dict:
     """Return the VIX state from the most recent daily VIX bar <= ``as_of``.
 
@@ -146,5 +138,5 @@ def get_vix_asof(as_of) -> dict:
     return {
         "vix_close": round(vix_close, 2),
         "vix_20ma": round(vix_20ma, 2) if vix_20ma is not None else None,
-        "vix_regime": _classify_vix_regime(vix_close),
+        "vix_regime": classify_vix_regime(vix_close),
     }

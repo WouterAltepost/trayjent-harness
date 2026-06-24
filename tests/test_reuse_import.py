@@ -42,7 +42,56 @@ def test_pulse_indicators_shape():
         assert key in out, f"missing pulse indicator key {key}"
 
 
+def test_phase2_pure_modules_import_and_known_values():
+    """Phase 2: the new pure modules import green via the shim and compute
+    known values, proving harness == live for breadth, VIX, and exits."""
+    from datetime import datetime, timedelta, timezone
+
+    from harness.reuse import (
+        trend_anchor,
+        compute_breadth,
+        classify_vix_regime,
+        evaluate_price_exit,
+        should_force_close_for_max_hold,
+    )
+
+    # VIX ladder boundaries (<15 / <20 / <30 / 30+).
+    assert classify_vix_regime(14.99) == "low"
+    assert classify_vix_regime(15.0) == "normal"
+    assert classify_vix_regime(19.99) == "normal"
+    assert classify_vix_regime(20.0) == "elevated"
+    assert classify_vix_regime(29.99) == "elevated"
+    assert classify_vix_regime(30.0) == "stressed"
+
+    # Exit ladder (percent units).
+    assert evaluate_price_exit(6.0, 5.0, 3.0) == "SELL (TAKE PROFIT)"
+    assert evaluate_price_exit(5.0, 5.0, 3.0) == "SELL (TAKE PROFIT)"   # >= boundary
+    assert evaluate_price_exit(-3.0, 5.0, 3.0) == "SELL (STOP LOSS)"    # <= boundary
+    assert evaluate_price_exit(1.0, 5.0, 3.0) is None
+
+    # Max-hold age check, fail-soft.
+    now = datetime(2026, 6, 24, tzinfo=timezone.utc)
+    assert should_force_close_for_max_hold(now - timedelta(hours=50), 48, now=now) is True
+    assert should_force_close_for_max_hold(now, 48, now=now) is False
+    assert should_force_close_for_max_hold(None, 48, now=now) is False
+    assert should_force_close_for_max_hold(now - timedelta(hours=50), None, now=now) is False
+
+    # Breadth: SPY excluded; % above trend anchor, 1dp; None on empty universe.
+    assert trend_anchor({"ma_50": 5, "ema_50": 9}) == 5      # ma_50 wins
+    assert trend_anchor({"ema_50": 9}) == 9                   # ema_50 fallback
+    assert trend_anchor({}) is None
+    assert compute_breadth([]) is None
+    sigs = [
+        {"ticker": "SPY", "ma_50": 1, "latest_close": 99},   # excluded
+        {"ticker": "AAA", "ma_50": 10, "latest_close": 11},  # above
+        {"ticker": "BBB", "ma_50": 10, "latest_close": 9},   # below
+    ]
+    assert compute_breadth(sigs) == 50.0
+
+
 if __name__ == "__main__":
     test_indicators_import_and_known_value()
     test_pulse_indicators_shape()
+    test_phase2_pure_modules_import_and_known_values()
     print("Phase 0 reuse shim OK: indicators imported from trading-agent and computed known values.")
+    print("Phase 2 reuse shim OK: breadth, vix, exit_rules imported and known values verified.")

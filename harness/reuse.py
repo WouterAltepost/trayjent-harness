@@ -9,9 +9,11 @@ config.py).
 
 `tools/__init__.py` is empty, so `from tools.indicators import ...` is safe.
 
-Sizing, gates, and scoring are deliberately NOT imported here. They live in
-modules with heavy import-time side effects and are deferred to Phase 2, where
-they get extracted into pure functions on the live side.
+Phase 2 extracts the live strategy logic into config-free `tools/` modules and
+re-exports it here alongside the indicators. Re-exported so far: breadth, VIX,
+and the exit primitives (sizing, scoring core, and the BUY cascade land in
+later Phase 2 commits). The heavy-side-effect modules (workflow, agent,
+market_data) are still never imported here.
 """
 import os
 import sys
@@ -33,5 +35,19 @@ from tools.indicators import (  # noqa: E402
     compute_indicators,
     compute_indicators_pulse,
 )
+from tools.breadth import trend_anchor, compute_breadth  # noqa: E402
+from tools.vix import classify_vix_regime  # noqa: E402
+from tools.exit_rules import (  # noqa: E402
+    evaluate_price_exit,
+    should_force_close_for_max_hold,
+)
 
-__all__ = ["compute_indicators", "compute_indicators_pulse"]
+__all__ = [
+    "compute_indicators",
+    "compute_indicators_pulse",
+    "trend_anchor",
+    "compute_breadth",
+    "classify_vix_regime",
+    "evaluate_price_exit",
+    "should_force_close_for_max_hold",
+]
