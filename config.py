@@ -47,6 +47,18 @@ POSITION_SIZING = {
 # (current production). "bracket" reserved for post-v10.
 EXIT_MODEL = "soft"
 
+# ── Portfolio simulator (Phase 3) ───────────────────────────────────────
+# Starting cash for a backtest portfolio. Mirrors the Alpaca paper accounts;
+# a deliberate backtest input, settable per run later (L9).
+INITIAL_CAPITAL = 100_000.0
+# Idealized fills (L5): v1 fills at the raw decision-bar close with ZERO costs.
+# These two seams exist so non-zero fees/slippage is a one-line change later
+# (applied through Portfolio._fill_price); no non-zero behavior this phase.
+# Any result built on these is gross, not net-of-costs — Phase 5 output must
+# flag "idealized fills (0 fees, 0 slippage, fill at close)".
+FEES_BPS = 0.0
+SLIPPAGE_BPS = 0.0
+
 # ── Data layer (Phase 1): watchlists + pull universe ────────────────────
 # Mirrors trading-agent/config.py v9.5. Frozen backtest input; update
 # deliberately. NOT imported from live config.py (it hard-fails on missing
