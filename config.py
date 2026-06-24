@@ -33,3 +33,33 @@ MIN_ROWS = 300           # mirrors fetch_intraday_price_data fail-closed floor
 # "soft" = check unrealized_pct vs threshold at bar close, fill at that close
 # (current production). "bracket" reserved for post-v10.
 EXIT_MODEL = "soft"
+
+# ── Data layer (Phase 1): watchlists + pull universe ────────────────────
+# Mirrors trading-agent/config.py v9.5. Frozen backtest input; update
+# deliberately. NOT imported from live config.py (it hard-fails on missing
+# env vars at import time, per phase0_discovery §3).
+STEADY_WATCHLIST = ["SPY", "MSFT", "NVDA", "AMD", "AMZN", "GOOGL", "GLD"]
+PULSE_WATCHLIST = ["NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL"]
+
+# Per-timeframe pull universe (brief L4). Daily = Steady watchlist + ^VIX
+# (the regime signal is daily even when Pulse runs hourly). Hourly = Pulse
+# watchlist + SPY (market/breadth context). SPY is held on both timeframes.
+DAILY_UNIVERSE = STEADY_WATCHLIST + ["^VIX"]
+HOURLY_UNIVERSE = ["SPY"] + PULSE_WATCHLIST
+
+# timeframe label -> {yfinance interval, pull universe}. The label is also the
+# Parquet subdir: data/{timeframe}/{ticker}.parquet (L3).
+TIMEFRAMES = {
+    "1d": {"interval": "1d", "universe": DAILY_UNIVERSE},
+    "1h": {"interval": "1h", "universe": HOURLY_UNIVERSE},
+}
+
+# ── Data layer: history depth + adjustment (brief L1, L5) ───────────────
+DAILY_HISTORY_YEARS = 10        # yfinance period for daily pulls ("10y")
+# Hourly is hard-capped ~730 days by Yahoo (verified PF-3). "2y" cleanly
+# returns the true ~729-day max; the literal "730d" is not a valid yfinance
+# period string and returns cache-polluted data, so it is deliberately avoided.
+HOURLY_PERIOD = "2y"
+# Store split/dividend-adjusted OHLCV (L1). Set explicitly so the harness is
+# deterministic regardless of the installed yfinance default.
+AUTO_ADJUST = True
