@@ -46,6 +46,8 @@ from tools.scoring_core import (  # noqa: E402
     parse_scoring_response,
     SCORING_MODEL,
     SCORING_TOOL,
+    SCORING_MAX_TOKENS,
+    SCORING_TOOL_CHOICE,
     PROMPTS,
 )
 from tools.buy_cascade import (  # noqa: E402
@@ -67,6 +69,8 @@ __all__ = [
     "parse_scoring_response",
     "SCORING_MODEL",
     "SCORING_TOOL",
+    "SCORING_MAX_TOKENS",
+    "SCORING_TOOL_CHOICE",
     "PROMPTS",
     "decide_buy_action",
     "late_day_blocked",
