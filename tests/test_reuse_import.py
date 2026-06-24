@@ -115,10 +115,60 @@ def test_phase2_sizing_matches_live():
     }
 
 
+def test_phase2_scoring_core_matches_live():
+    """Phase 2: scoring core re-exported via the shim. The assembled prompt is
+    byte-identical to live (same golden hashes as the trading-agent
+    characterization), and parse applies the score>=threshold action fallback."""
+    import hashlib
+
+    from harness.reuse import (
+        build_scoring_prompt,
+        parse_scoring_response,
+        SCORING_MODEL,
+    )
+
+    signals = [
+        {"ticker": "NVDA", "rsi": 45.0, "macd_histogram": 0.5, "latest_close": 100.0,
+         "ma_50": 95.0, "ma_200": 90.0, "previous_score": 6},
+        {"ticker": "AMD", "rsi": 62.0, "macd_histogram": -0.2, "latest_close": 50.0,
+         "ma_50": 51.0, "ma_200": 48.0},
+    ]
+    mc = {"vix_close": 18.5, "vix_20ma": 17.2, "vix_regime": "normal",
+          "market_breadth_pct": 62.5}
+    gold = {
+        "steady": "24664d20806526b8efe70e4ceddc1b835ae98b985e64872d40c48a29ea5bebb7",
+        "pulse": "2cb2218b891fc3eea3f2dd174b24caf111f726edfb1c973027e1f3ca4a5581b8",
+    }
+    for name, thr in (("steady", 7), ("pulse", 6)):
+        prompt = build_scoring_prompt(signals, {"name": name, "buy_threshold": thr}, mc)
+        assert hashlib.sha256(prompt.encode()).hexdigest() == gold[name], \
+            f"{name} prompt diverged from live"
+
+    assert SCORING_MODEL == "claude-opus-4-7"
+
+    class _Block:
+        def __init__(self, type, name=None, input=None):
+            self.type, self.name, self.input = type, name, input
+
+    content = [_Block("tool_use", "submit_ticker_scores", {
+        "market_assessment": "",
+        "scores": [
+            {"ticker": "NVDA", "score": 8, "reasoning": "r"},
+            {"ticker": "AMD", "score": 4, "reasoning": "r"},
+        ],
+    })]
+    decisions = parse_scoring_response(content, {"name": "steady", "buy_threshold": 7})
+    assert decisions == [
+        {"ticker": "NVDA", "score": 8, "reasoning": "r", "action": "BUY"},
+        {"ticker": "AMD", "score": 4, "reasoning": "r", "action": "SKIP"},
+    ]
+
+
 if __name__ == "__main__":
     test_indicators_import_and_known_value()
     test_pulse_indicators_shape()
     test_phase2_pure_modules_import_and_known_values()
     test_phase2_sizing_matches_live()
+    test_phase2_scoring_core_matches_live()
     print("Phase 0 reuse shim OK: indicators imported from trading-agent and computed known values.")
-    print("Phase 2 reuse shim OK: breadth, vix, exit_rules, sizing imported and known values verified.")
+    print("Phase 2 reuse shim OK: breadth, vix, exit_rules, sizing, scoring_core imported and known values verified.")

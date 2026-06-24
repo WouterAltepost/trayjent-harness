@@ -11,9 +11,9 @@ config.py).
 
 Phase 2 extracts the live strategy logic into config-free `tools/` modules and
 re-exports it here alongside the indicators. Re-exported so far: breadth, VIX,
-the exit primitives, and sizing (scoring core and the BUY cascade land in later
-Phase 2 commits). The heavy-side-effect modules (workflow, agent, market_data)
-are still never imported here.
+the exit primitives, sizing, and the scoring core (the BUY cascade lands in the
+final Phase 2 commit). The heavy-side-effect modules (workflow, agent,
+market_data) are still never imported here.
 """
 import os
 import sys
@@ -42,6 +42,13 @@ from tools.exit_rules import (  # noqa: E402
     should_force_close_for_max_hold,
 )
 from tools.sizing import compute_position_size  # noqa: E402
+from tools.scoring_core import (  # noqa: E402
+    build_scoring_prompt,
+    parse_scoring_response,
+    SCORING_MODEL,
+    SCORING_TOOL,
+    PROMPTS,
+)
 
 __all__ = [
     "compute_indicators",
@@ -52,4 +59,9 @@ __all__ = [
     "evaluate_price_exit",
     "should_force_close_for_max_hold",
     "compute_position_size",
+    "build_scoring_prompt",
+    "parse_scoring_response",
+    "SCORING_MODEL",
+    "SCORING_TOOL",
+    "PROMPTS",
 ]
