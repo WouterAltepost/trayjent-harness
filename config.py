@@ -19,6 +19,13 @@ PROMPT_VERSION = "v9.5"
 # Hard ceiling for a single backtest's Claude spend, enforced before a run
 # that would call the API (Phase 5). Rough full-Pulse estimate is $200-400.
 COST_CEILING_USD = 50.0
+# Per-model token prices ($/Mtok), confirmed PF-1 against current Anthropic
+# pricing: claude-opus-4-7 is the Opus 4.x tier at $5 in / $25 out. The cost
+# tracker (Phase 4) computes spend from this table; a wrong rate makes the
+# ceiling lie, so this is a confirmed external value, not a guess.
+PRICES = {
+    "claude-opus-4-7": {"input_per_mtok": 5.00, "output_per_mtok": 25.00},
+}
 
 # ── Indicator fidelity windows (see discovery §4) ───────────────────────
 # EMA seeds from the first `period` values of the close list, so indicator
