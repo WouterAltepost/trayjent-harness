@@ -29,6 +29,19 @@ STEADY_BARS = 300        # trailing daily closes per decision
 PULSE_BARS = 440         # trailing hourly closes per decision
 MIN_ROWS = 300           # mirrors fetch_intraday_price_data fail-closed floor
 
+# ── Position sizing (Phase 2): frozen mirror of live POSITION_SIZING ─────
+# tools.sizing.compute_position_size is config-free (L5) and takes this dict as
+# a required arg. Mirrors trading-agent/config.py POSITION_SIZING; NOT imported
+# from live config (it hard-fails on missing env at import). Frozen backtest
+# input — update deliberately when live sizing changes. Pinned by
+# tests/test_reuse_import.py.
+POSITION_SIZING = {
+    "base_pct_per_score": 0.05,
+    "cash_safety_pct": 0.80,
+    "min_trade_dollars": 500,
+    "multiplier_cap": 4,
+}
+
 # ── First exit model (D6) ───────────────────────────────────────────────
 # "soft" = check unrealized_pct vs threshold at bar close, fill at that close
 # (current production). "bracket" reserved for post-v10.

@@ -89,9 +89,36 @@ def test_phase2_pure_modules_import_and_known_values():
     assert compute_breadth(sigs) == 50.0
 
 
+def test_phase2_sizing_matches_live():
+    """Phase 2: sizing is re-exported from live via the shim, and the harness's
+    frozen POSITION_SIZING reproduces the live sizing battery — so harness
+    sizing == live sizing on shared inputs (Phase 0 §5)."""
+    import config as harness_config
+    from harness.reuse import compute_position_size
+
+    sizing = harness_config.POSITION_SIZING
+    # Minimal strategy dicts — compute_position_size reads only these three keys.
+    steady = {"buy_threshold": 7, "cash_safety_pct": 0.80, "stop_loss": 0.03}
+    pulse = {"buy_threshold": 6, "cash_safety_pct": 0.90, "stop_loss": 0.01}
+
+    assert compute_position_size(9, 100_000, 100_000, steady, sizing) == (15000.0, "score_ladder")
+    assert compute_position_size(8, 100_000, 10_000, pulse, sizing) == (9000.0, "cash_cap")
+    assert compute_position_size(6, 100_000, 100_000, steady, sizing) == (None, "multiplier_zero")
+    assert compute_position_size(7, 8_000, 100_000, steady, sizing) == (None, "insufficient_capital")
+
+    # The frozen harness sizing config matches the live constants exactly.
+    assert sizing == {
+        "base_pct_per_score": 0.05,
+        "cash_safety_pct": 0.80,
+        "min_trade_dollars": 500,
+        "multiplier_cap": 4,
+    }
+
+
 if __name__ == "__main__":
     test_indicators_import_and_known_value()
     test_pulse_indicators_shape()
     test_phase2_pure_modules_import_and_known_values()
+    test_phase2_sizing_matches_live()
     print("Phase 0 reuse shim OK: indicators imported from trading-agent and computed known values.")
-    print("Phase 2 reuse shim OK: breadth, vix, exit_rules imported and known values verified.")
+    print("Phase 2 reuse shim OK: breadth, vix, exit_rules, sizing imported and known values verified.")
