@@ -1,0 +1,7 @@
+# TBH v1 dependencies (Mac-only, offline)
+yfinance>=0.2.40
+pandas>=2.0
+pyarrow>=14.0          # Parquet storage for bars
+numpy>=1.24
+anthropic>=0.39        # scoring, Phase 4 (cache-backed)
+pytest>=8.0
