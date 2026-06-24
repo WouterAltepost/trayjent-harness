@@ -10,10 +10,9 @@ config.py).
 `tools/__init__.py` is empty, so `from tools.indicators import ...` is safe.
 
 Phase 2 extracts the live strategy logic into config-free `tools/` modules and
-re-exports it here alongside the indicators. Re-exported so far: breadth, VIX,
-the exit primitives, sizing, and the scoring core (the BUY cascade lands in the
-final Phase 2 commit). The heavy-side-effect modules (workflow, agent,
-market_data) are still never imported here.
+re-exports it here alongside the indicators: breadth, VIX, the exit primitives,
+sizing, the scoring core, and the BUY cascade. The heavy-side-effect modules
+(workflow, agent, market_data) are never imported here.
 """
 import os
 import sys
@@ -49,6 +48,11 @@ from tools.scoring_core import (  # noqa: E402
     SCORING_TOOL,
     PROMPTS,
 )
+from tools.buy_cascade import (  # noqa: E402
+    decide_buy_action,
+    late_day_blocked,
+    rsi_ceiling_hit,
+)
 
 __all__ = [
     "compute_indicators",
@@ -64,4 +68,7 @@ __all__ = [
     "SCORING_MODEL",
     "SCORING_TOOL",
     "PROMPTS",
+    "decide_buy_action",
+    "late_day_blocked",
+    "rsi_ceiling_hit",
 ]

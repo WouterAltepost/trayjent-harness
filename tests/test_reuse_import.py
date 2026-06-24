@@ -164,11 +164,64 @@ def test_phase2_scoring_core_matches_live():
     ]
 
 
+def test_phase2_buy_cascade_matches_live():
+    """Phase 2: the BUY cascade is re-exported and callable config-free with an
+    injected ctx (no I/O). Verdict strings match the live cascade verbatim."""
+    from datetime import datetime, timezone
+
+    import config as harness_config
+    from harness.reuse import decide_buy_action
+
+    sizing = harness_config.POSITION_SIZING
+    steady = {"name": "steady", "buy_threshold": 7, "cash_safety_pct": 0.80, "stop_loss": 0.03}
+    pulse = {"name": "pulse", "buy_threshold": 6, "cash_safety_pct": 0.90, "stop_loss": 0.01,
+             "late_day_block_utc_hours": [19], "rsi_buy_ceiling": 75}
+
+    def ctx(**over):
+        base = {
+            "market_open": True, "held": set(), "earnings": {},
+            "risk_state": {"tripped": False, "peak_pv": 100_000.0},
+            "portfolio_value": 100_000.0, "cash": 100_000.0,
+            "strategy": steady, "indicators": {"rsi": 50.0}, "sizing_config": sizing,
+            "buys_disabled": False,
+            "now": datetime(2026, 6, 24, 15, 0, 0, tzinfo=timezone.utc),
+        }
+        base.update(over)
+        return base
+
+    # Successful BUY.
+    assert decide_buy_action({"ticker": "NVDA", "score": 9, "action": "BUY", "reasoning": "r"},
+                             ctx()) == {
+        "action": "BUY", "reasoning_suffix": "", "notional": 15000.0,
+        "sizing_rule_bound": "score_ladder"}
+    # Breaker tripped, with snapshot (10% drawdown).
+    assert decide_buy_action({"ticker": "NVDA", "score": 9, "action": "BUY", "reasoning": "r"},
+                             ctx(risk_state={"tripped": True, "peak_pv": 100_000.0},
+                                 portfolio_value=90_000.0)) == {
+        "action": "SKIP (BREAKER TRIPPED)",
+        "reasoning_suffix": " | Drawdown breaker tripped (current 10.00%, peak $100,000.00); BUYs blocked.",
+        "notional": None, "sizing_rule_bound": "none"}
+    # Multiplier zero (score below threshold).
+    assert decide_buy_action({"ticker": "NVDA", "score": 5, "action": "BUY", "reasoning": "r"},
+                             ctx()) == {
+        "action": "SKIP (MULTIPLIER ZERO)",
+        "reasoning_suffix": " | Score 5 below threshold 7; sizing multiplier is zero.",
+        "notional": None, "sizing_rule_bound": "none"}
+    # Late-day gate (Pulse, UTC hour 19).
+    assert decide_buy_action({"ticker": "NVDA", "score": 8, "action": "BUY", "reasoning": "r"},
+                             ctx(strategy=pulse,
+                                 now=datetime(2026, 6, 24, 19, 0, 0, tzinfo=timezone.utc))) == {
+        "action": "SKIP (LATE DAY)",
+        "reasoning_suffix": " | Late-day entry blocked (UTC hour 19); v9.5 time gate.",
+        "notional": None, "sizing_rule_bound": "none"}
+
+
 if __name__ == "__main__":
     test_indicators_import_and_known_value()
     test_pulse_indicators_shape()
     test_phase2_pure_modules_import_and_known_values()
     test_phase2_sizing_matches_live()
     test_phase2_scoring_core_matches_live()
+    test_phase2_buy_cascade_matches_live()
     print("Phase 0 reuse shim OK: indicators imported from trading-agent and computed known values.")
-    print("Phase 2 reuse shim OK: breadth, vix, exit_rules, sizing, scoring_core imported and known values verified.")
+    print("Phase 2 reuse shim OK: breadth, vix, exit_rules, sizing, scoring_core, buy_cascade imported and known values verified.")
