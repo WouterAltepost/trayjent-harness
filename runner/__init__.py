@@ -15,6 +15,7 @@ from runner.configs import (
 )
 from runner.schedule import decision_points
 from runner.run import run_backtest, RunResult
+from runner.metrics import compute_metrics
 
 __all__ = [
     "RunConfig",
@@ -24,4 +25,5 @@ __all__ = [
     "decision_points",
     "run_backtest",
     "RunResult",
+    "compute_metrics",
 ]

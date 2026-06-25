@@ -70,6 +70,7 @@ class RunResult:
     closed_trades: list
     equity_curve: list
     n_decision_points: int
+    initial_capital: float
     cost_tracker: object = None
     halted_on_cost: bool = False
 
@@ -236,6 +237,7 @@ def run_backtest(run_config, *, score_batch=None, cache=None) -> RunResult:
         closed_trades=portfolio.closed_trades,
         equity_curve=equity_curve,
         n_decision_points=len(marks),
+        initial_capital=config.INITIAL_CAPITAL,
         cost_tracker=cost_tracker,
         halted_on_cost=halted_on_cost,
     )
