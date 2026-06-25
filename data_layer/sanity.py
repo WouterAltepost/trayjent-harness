@@ -12,11 +12,12 @@ Pure and offline: no network, no config import beyond constants used here.
 """
 
 # Soft expected row-count bands per timeframe over the configured history
-# depth (daily ~10y, hourly ~2y). Outside the band -> warn (partial pull or
-# unexpected surplus), never fail.
+# depth (daily ~10y, hourly ~2y, 30m ~60d ≈ 60 sessions × 13 bars ≈ 780).
+# Outside the band -> warn (partial pull or unexpected surplus), never fail.
 _ROW_BANDS = {
     "1d": (2000, 3200),
     "1h": (2500, 4200),
+    "30m": (600, 900),
 }
 
 # A single adjusted-close bar move beyond this fraction suggests an unadjusted
@@ -25,10 +26,11 @@ _ROW_BANDS = {
 _MAX_BAR_RETURN = 0.35
 
 # Consecutive-bar gap (calendar) beyond this many days -> warn. Daily tolerates
-# long weekends/holidays; hourly tolerates weekends but flags missing weeks.
+# long weekends/holidays; intraday tolerates weekends but flags missing weeks.
 _GAP_DAYS = {
     "1d": 7,
     "1h": 4,
+    "30m": 4,
 }
 
 

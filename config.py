@@ -78,12 +78,17 @@ PULSE_WATCHLIST = ["NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL"]
 # watchlist + SPY (market/breadth context). SPY is held on both timeframes.
 DAILY_UNIVERSE = STEADY_WATCHLIST + ["^VIX"]
 HOURLY_UNIVERSE = ["SPY"] + PULSE_WATCHLIST
+# 30-min universe (Phase 5 L3): Pulse watchlist + SPY, same as hourly. The
+# 30m bars feed Pulse-30min's decision/exit *prices*; indicators still come
+# from the 1h bars (L2). No ^VIX — the regime signal is daily (A4).
+THIRTYMIN_UNIVERSE = ["SPY"] + PULSE_WATCHLIST
 
 # timeframe label -> {yfinance interval, pull universe}. The label is also the
 # Parquet subdir: data/{timeframe}/{ticker}.parquet (L3).
 TIMEFRAMES = {
     "1d": {"interval": "1d", "universe": DAILY_UNIVERSE},
     "1h": {"interval": "1h", "universe": HOURLY_UNIVERSE},
+    "30m": {"interval": "30m", "universe": THIRTYMIN_UNIVERSE},
 }
 
 # ── Data layer: history depth + adjustment (brief L1, L5) ───────────────
@@ -92,6 +97,22 @@ DAILY_HISTORY_YEARS = 10        # yfinance period for daily pulls ("10y")
 # returns the true ~729-day max; the literal "730d" is not a valid yfinance
 # period string and returns cache-polluted data, so it is deliberately avoided.
 HOURLY_PERIOD = "2y"
+# 30-min is hard-capped at ~60 trading days by Yahoo (verified Phase 5 PF-1:
+# "60d" returns ~779 SPY bars ≈ 60 sessions; "90d"/"730d"/"2y" all return
+# EMPTY with "must be within the last 60 days"). "60d" is the true max.
+THIRTYMIN_PERIOD = "60d"
 # Store split/dividend-adjusted OHLCV (L1). Set explicitly so the harness is
 # deterministic regardless of the installed yfinance default.
 AUTO_ADJUST = True
+
+# ── Sealed out-of-sample windows (Phase 5 L11) ──────────────────────────
+# NEVER pass these ranges to a development run. The runner takes an explicit
+# [start, end]; these slices are simply never requested until the one
+# post-Phase-6 read. Each is (start, end) inclusive, ISO date.
+#   Steady (daily):       a 2020-2021 slab.
+#   Pulse-hourly (edge):  the most recent quarter.
+# Pulse-30min is mechanical fidelity only (≈60d, overlaps the hourly quarter
+# by nature) — do not tune any strategy parameter from it, and keep the hourly
+# OOS quarter untouched.
+OOS_STEADY = ("2020-01-01", "2021-12-31")
+OOS_PULSE_HOURLY = ("2026-04-01", "2026-06-24")

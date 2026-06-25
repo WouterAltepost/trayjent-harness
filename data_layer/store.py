@@ -52,6 +52,8 @@ def pull_ticker(ticker: str, timeframe: str) -> "pd.DataFrame":
     interval = spec["interval"]
     if interval == "1d":
         period = f"{config.DAILY_HISTORY_YEARS}y"
+    elif interval == "30m":
+        period = config.THIRTYMIN_PERIOD
     else:
         period = config.HOURLY_PERIOD
 
