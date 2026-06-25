@@ -14,6 +14,7 @@ from runner.configs import (
     MODES,
 )
 from runner.schedule import decision_points
+from runner.run import run_backtest, RunResult
 
 __all__ = [
     "RunConfig",
@@ -21,4 +22,6 @@ __all__ = [
     "PRESET_NAMES",
     "MODES",
     "decision_points",
+    "run_backtest",
+    "RunResult",
 ]
