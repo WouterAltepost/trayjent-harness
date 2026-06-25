@@ -6,10 +6,21 @@ contract as of any decision timestamp T. Deliberately does NOT import
 
 - ``get_window(ticker, timeframe, as_of, n_bars=None)`` -> the live
   ``{"ticker", "close_prices", "volumes"}`` dict, oldest->newest, ending at the
-  last bar with ``timestamp <= as_of``. Honest about time: a bar that closes
-  after T does not exist yet and is never included.
+  last bar whose **close time** is ``<= as_of``. Honest about time: a bar that
+  closes after T does not exist yet and is never included.
+- ``get_price_asof(ticker, timeframe, as_of)`` -> the close of the latest bar
+  whose close time is ``<= as_of`` (the decision-tf fill/exit price). No
+  MIN_ROWS floor — a single-price lookup, not an indicator window.
 - ``get_vix_asof(as_of)`` -> ``{"vix_close", "vix_20ma", "vix_regime"}`` from
   the most recent daily VIX bar <= T, classified with the live regime ladder.
+
+No-lookahead, intraday (Phase 5 PF-2): yfinance stamps intraday bars at the bar
+START (1h at :30 ET aligned to the 09:30 open; 30m at :30/:00), and consecutive
+bars are contiguous, so a bar with ``start <= as_of`` may still be FORMING — its
+final close reflects data after T. Eligibility therefore tests the bar's CLOSE
+time (``start + tf_duration``), not its start. Daily bars are already stored at
+the session-close instant (store stamps them 21:00 UTC), so their close time is
+the stored timestamp (duration 0) and daily behaviour is unchanged.
 """
 import os
 
@@ -29,12 +40,41 @@ def _parquet_path(ticker: str, timeframe: str) -> str:
 def _bars_per_timeframe(timeframe: str) -> int:
     """Default trailing-window length per timeframe (L7): daily Steady window,
     hourly Pulse window. Window length is not cosmetic — EMA seeds from the
-    first `period` values of the list, so the slice length must match live."""
+    first `period` values of the list, so the slice length must match live.
+
+    Only the two indicator timeframes have a live default. ``30m`` is a
+    decision/exit *price* timeframe (Pulse-30min indicators come from 1h, L2),
+    so it has no indicator window default; callers needing a 30m window pass
+    ``n_bars`` explicitly."""
     if timeframe == "1d":
         return config.STEADY_BARS
     if timeframe == "1h":
         return config.PULSE_BARS
-    raise ValueError(f"unknown timeframe {timeframe!r}")
+    raise ValueError(f"no default window for timeframe {timeframe!r}; pass n_bars")
+
+
+# Nominal bar duration per timeframe, used to derive each bar's CLOSE time for
+# the no-lookahead slice (see module docstring). Daily is 0 (already stored at
+# the session-close instant); intraday adds the bar length to the START stamp.
+# Stub-bar nuance: the last 1h bar of a US session is START-stamped 15:30 ET but
+# really a 30-min stub closing 16:00 ET; the uniform +1h treats it as closing
+# 16:30, so Pulse's final daily decision misses that one bar in its (440-bar)
+# indicator window. Conservative (lookahead-safe) and immaterial — refine only
+# if it ever proves material.
+_TF_DURATION = {
+    "1d": pd.Timedelta(0),
+    "1h": pd.Timedelta(hours=1),
+    "30m": pd.Timedelta(minutes=30),
+}
+
+
+def _eligible(df: "pd.DataFrame", timeframe: str, cutoff: "pd.Timestamp") -> "pd.DataFrame":
+    """Rows whose bar CLOSE time is ``<= cutoff`` — the no-lookahead filter."""
+    try:
+        duration = _TF_DURATION[timeframe]
+    except KeyError:
+        raise ValueError(f"unknown timeframe {timeframe!r}")
+    return df[df["timestamp"] + duration <= cutoff]
 
 
 def _as_utc(as_of) -> "pd.Timestamp":
@@ -88,11 +128,11 @@ def get_window(ticker: str, timeframe: str, as_of, n_bars: int = None) -> dict:
     df = _load(ticker, timeframe)
     cutoff = _as_utc(as_of)
 
-    eligible = df[df["timestamp"] <= cutoff]
+    eligible = _eligible(df, timeframe, cutoff)
     if len(eligible) < config.MIN_ROWS:
         raise ValueError(
             f"Insufficient history for {ticker} {timeframe} as of {cutoff}: "
-            f"{len(eligible)} bars <= T, need at least {config.MIN_ROWS}"
+            f"{len(eligible)} bars closed <= T, need at least {config.MIN_ROWS}"
         )
 
     window = eligible.tail(n_bars)
@@ -101,6 +141,30 @@ def get_window(ticker: str, timeframe: str, as_of, n_bars: int = None) -> dict:
         "close_prices": [float(p) for p in window["close"].tolist()],
         "volumes": [int(v) for v in window["volume"].tolist()],
     }
+
+
+def get_price_asof(ticker: str, timeframe: str, as_of) -> float:
+    """Return the close of the latest bar on ``timeframe`` whose close time is
+    ``<= as_of`` — the decision-tf fill/exit price (Phase 5 PF-5).
+
+    Unlike :func:`get_window` there is **no** ``MIN_ROWS`` floor: this is a
+    single most-recent-price lookup (Pulse-30min exit checks and fills), not an
+    indicator window, so it must return as soon as one bar has closed.
+
+    Raises
+    ------
+    ValueError
+        If no bar on ``timeframe`` has closed at or before ``as_of``.
+    """
+    df = _load(ticker, timeframe)
+    cutoff = _as_utc(as_of)
+
+    eligible = _eligible(df, timeframe, cutoff)
+    if len(eligible) == 0:
+        raise ValueError(
+            f"No closed {timeframe} bar for {ticker} at or before {cutoff}"
+        )
+    return float(eligible["close"].iloc[-1])
 
 
 # ── VIX regime, as of T ─────────────────────────────────────────────────

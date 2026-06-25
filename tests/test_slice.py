@@ -56,9 +56,14 @@ def _setup():
     # SPY daily: 700 bars, well above STEADY_BARS(300) and MIN_ROWS(300).
     spy_d = _write_bars(data_dir, "SPY", "1d",
                         [100.0 + i for i in range(700)], "2022-01-03 21:00", "B")
-    # SPY hourly: 900 bars, well above PULSE_BARS(440).
+    # SPY hourly: 900 bars, well above PULSE_BARS(440). Contiguous (freq "h")
+    # and START-stamped, so close_time = start + 1h — the no-lookahead surface.
     spy_h = _write_bars(data_dir, "SPY", "1h",
                         [50.0 + i for i in range(900)], "2024-01-02 14:30", "h")
+    # SPY 30-min: a short contiguous series — get_price_asof has no MIN_ROWS
+    # floor, so 12 bars is enough to pin its close-time + no-lookahead rule.
+    spy_30 = _write_bars(data_dir, "SPY", "30m",
+                         [70.0 + i for i in range(12)], "2024-01-02 14:30", "30min")
 
     # ^VIX daily: 30 bars, mostly 12.0, with boundary closes planted at known
     # indices so the regime ladder can be pinned. Indices >= 20 also exercise
@@ -73,7 +78,8 @@ def _setup():
     vix = _write_bars(data_dir, "^VIX", "1d", vix_closes, "2024-01-01 21:00", "B",
                       volumes=[0] * 30)
 
-    _FIXTURE.update({"dir": data_dir, "spy_d": spy_d, "spy_h": spy_h, "vix": vix})
+    _FIXTURE.update({"dir": data_dir, "spy_d": spy_d, "spy_h": spy_h,
+                     "spy_30": spy_30, "vix": vix})
     return _FIXTURE
 
 
@@ -94,12 +100,61 @@ def test_lookahead_boundary_both_sides():
         "a bar stamped after as_of must be excluded"
 
 
+# ── Intraday close-time no-lookahead (PF-2) ─────────────────────────────
+# yfinance START-stamps intraday bars and consecutive bars are contiguous, so a
+# bar whose START <= as_of may still be FORMING. Eligibility must test the bar's
+# CLOSE time (start + tf_duration); the forming bar is never included.
+def test_intraday_close_time_no_lookahead():
+    f = _setup()
+    df = f["spy_h"]
+    k = 500  # well above the 300 floor
+    start_k = df["timestamp"].iloc[k]
+
+    # as_of exactly at bar k's START: bar k spans [start, start+1h) and has NOT
+    # closed -> its FINAL close must be excluded; window ends on bar k-1.
+    at_start = sl.get_window("SPY", "1h", start_k, n_bars=300)
+    assert at_start["close_prices"][-1] == float(df["close"].iloc[k - 1]), \
+        "a still-forming intraday bar (start <= as_of < close) must be excluded"
+
+    # as_of at bar k's CLOSE (start + 1h): now bar k is complete and included.
+    at_close = sl.get_window("SPY", "1h", start_k + pd.Timedelta(hours=1), n_bars=300)
+    assert at_close["close_prices"][-1] == float(df["close"].iloc[k]), \
+        "an intraday bar is included once its close time <= as_of"
+
+
+# ── get_price_asof: latest closed price, no floor, no lookahead ──────────
+def test_get_price_asof_close_time_and_no_floor():
+    f = _setup()
+    df = f["spy_30"]            # only 12 bars — below MIN_ROWS, on purpose
+    k = 5
+    start_k = df["timestamp"].iloc[k]
+
+    # No MIN_ROWS floor: returns even with a handful of bars.
+    # At bar k's start, bar k is forming -> latest CLOSED 30m bar is k-1.
+    assert sl.get_price_asof("SPY", "30m", start_k) == float(df["close"].iloc[k - 1]), \
+        "price is the latest bar whose close time <= as_of (forming bar excluded)"
+    # At bar k's close (start + 30m), bar k is the latest closed price.
+    assert sl.get_price_asof("SPY", "30m", start_k + pd.Timedelta(minutes=30)) \
+        == float(df["close"].iloc[k]), "bar included once its close time <= as_of"
+
+    # Before the first bar has closed -> nothing eligible -> raise.
+    first_start = df["timestamp"].iloc[0]
+    try:
+        sl.get_price_asof("SPY", "30m", first_start)  # first bar still forming
+        assert False, "expected ValueError when no 30m bar has closed yet"
+    except ValueError:
+        pass
+
+
 # ── Window length, recency, ordering ────────────────────────────────────
 def test_window_length_recency_and_order():
     f = _setup()
     df = f["spy_h"]              # 900 bars, eligible well above n_bars
     n = config.PULSE_BARS       # 440
-    w = sl.get_window("SPY", "1h", df["timestamp"].iloc[-1], n_bars=n)
+    # as_of at the last hourly bar's CLOSE (start + 1h) so that bar is eligible;
+    # at its raw start it would still be forming and correctly excluded.
+    last_close = df["timestamp"].iloc[-1] + pd.Timedelta(hours=1)
+    w = sl.get_window("SPY", "1h", last_close, n_bars=n)
 
     assert len(w["close_prices"]) == n, "exact n_bars when eligible exceeds n_bars"
     # Most recent n_bars, oldest->newest.
@@ -125,8 +180,8 @@ def test_floor_below_min_rows_raises():
 # ── Default window resolves per timeframe (L7) ──────────────────────────
 def test_default_window_per_timeframe():
     f = _setup()
-    last_d = f["spy_d"]["timestamp"].iloc[-1]
-    last_h = f["spy_h"]["timestamp"].iloc[-1]
+    last_d = f["spy_d"]["timestamp"].iloc[-1]              # daily: close-stamped
+    last_h = f["spy_h"]["timestamp"].iloc[-1] + pd.Timedelta(hours=1)  # 1h close
     assert len(sl.get_window("SPY", "1d", last_d)["close_prices"]) == config.STEADY_BARS
     assert len(sl.get_window("SPY", "1h", last_h)["close_prices"]) == config.PULSE_BARS
 
@@ -170,9 +225,12 @@ def test_vix_regime_ladder_boundaries():
 
 if __name__ == "__main__":
     test_lookahead_boundary_both_sides()
+    test_intraday_close_time_no_lookahead()
+    test_get_price_asof_close_time_and_no_floor()
     test_window_length_recency_and_order()
     test_floor_below_min_rows_raises()
     test_default_window_per_timeframe()
     test_vix_latest_close_and_20ma_none()
     test_vix_regime_ladder_boundaries()
-    print("test_slice OK: lookahead, window length/recency, floor, default window, VIX as-of + regime ladder.")
+    print("test_slice OK: lookahead (daily + intraday close-time), get_price_asof, "
+          "window length/recency, floor, default window, VIX as-of + regime ladder.")
