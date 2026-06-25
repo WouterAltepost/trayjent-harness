@@ -61,7 +61,10 @@ def _bars_per_timeframe(timeframe: str) -> int:
 # 16:30, so Pulse's final daily decision misses that one bar in its (440-bar)
 # indicator window. Conservative (lookahead-safe) and immaterial — refine only
 # if it ever proves material.
-_TF_DURATION = {
+# Public: the runner's decision calendar (runner/schedule.py) derives each
+# decision's as_of from a SPY bar's close instant (start + duration) using this
+# same map, so the close-time rule has one source of truth.
+TF_DURATION = {
     "1d": pd.Timedelta(0),
     "1h": pd.Timedelta(hours=1),
     "30m": pd.Timedelta(minutes=30),
@@ -71,7 +74,7 @@ _TF_DURATION = {
 def _eligible(df: "pd.DataFrame", timeframe: str, cutoff: "pd.Timestamp") -> "pd.DataFrame":
     """Rows whose bar CLOSE time is ``<= cutoff`` — the no-lookahead filter."""
     try:
-        duration = _TF_DURATION[timeframe]
+        duration = TF_DURATION[timeframe]
     except KeyError:
         raise ValueError(f"unknown timeframe {timeframe!r}")
     return df[df["timestamp"] + duration <= cutoff]

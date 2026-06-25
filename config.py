@@ -73,6 +73,41 @@ SLIPPAGE_BPS = 0.0
 STEADY_WATCHLIST = ["SPY", "MSFT", "NVDA", "AMD", "AMZN", "GOOGL", "GLD"]
 PULSE_WATCHLIST = ["NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL"]
 
+# ── Strategy configs (Phase 5): frozen mirror of live STRATEGY_* ─────────
+# Decision-relevant keys only — the live I/O keys (alpaca_*, sheet_name,
+# interval, lookback) are dropped: the backtest never trades, fetches, or logs
+# to Sheets. A frozen backtest input carried through the runner as RunConfig
+# .strategy; NOT imported from trading-agent/config.py (it hard-fails on missing
+# env at import). Mirrors STRATEGY_STEADY / STRATEGY_PULSE — update deliberately
+# when live strategy params change.
+STRATEGY_STEADY = {
+    "name": "steady",
+    "buy_threshold": 7,
+    "take_profit": 0.05,
+    "stop_loss": 0.03,
+    "ma_short": 50,
+    "ma_long": 200,
+    "use_obv": False,
+    "use_ema_short": False,
+    "cash_safety_pct": 0.80,
+    "watchlist": STEADY_WATCHLIST,
+}
+STRATEGY_PULSE = {
+    "name": "pulse",
+    "buy_threshold": 6,
+    "take_profit": 0.02,
+    "stop_loss": 0.01,
+    "ma_short": 20,
+    "ma_long": 50,
+    "use_obv": True,
+    "use_ema_short": True,
+    "max_hold_hours": 48,
+    "cash_safety_pct": 0.90,
+    "watchlist": PULSE_WATCHLIST,
+    "rsi_buy_ceiling": 75,
+    "late_day_block_utc_hours": [19],
+}
+
 # Per-timeframe pull universe (brief L4). Daily = Steady watchlist + ^VIX
 # (the regime signal is daily even when Pulse runs hourly). Hourly = Pulse
 # watchlist + SPY (market/breadth context). SPY is held on both timeframes.
