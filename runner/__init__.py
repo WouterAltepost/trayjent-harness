@@ -16,6 +16,7 @@ from runner.configs import (
 from runner.schedule import decision_points
 from runner.run import run_backtest, RunResult
 from runner.metrics import compute_metrics
+from runner.output import build_output, to_json
 
 __all__ = [
     "RunConfig",
@@ -26,4 +27,6 @@ __all__ = [
     "run_backtest",
     "RunResult",
     "compute_metrics",
+    "build_output",
+    "to_json",
 ]
