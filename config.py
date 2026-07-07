@@ -16,9 +16,13 @@ CACHE_DIR = os.path.join(HARNESS_ROOT, "cache")   # SQLite Claude cache
 # The prompt is a versioned cache-key input. Bump when the agent prompt
 # changes so the Claude cache invalidates. Mirror trading-agent prompt edits.
 PROMPT_VERSION = "v9.5"
-# Hard ceiling for a single backtest's Claude spend, enforced before a run
-# that would call the API (Phase 5). Rough full-Pulse estimate is $200-400.
-COST_CEILING_USD = 50.0
+# Hard ceiling for a single backtest's Claude spend, enforced PER RUN before a
+# call that would breach it (Phase 5; fails closed via a rolling per-call avg).
+# Set from Stage B's measured cost: ~$0.036/call (Opus 4.7, ~3,830 in / ~675
+# out tok). Largest single in-sample run (Pulse-hourly ~2,640 pts) ~$95, Steady
+# ~$41, so $250 clears the worst legitimate run ~2.6x while halting a runaway
+# well short of $1k. Per-run, so it covers the largest single run, not the sum.
+COST_CEILING_USD = 250.0
 # Per-model token prices ($/Mtok), confirmed PF-1 against current Anthropic
 # pricing: claude-opus-4-7 is the Opus 4.x tier at $5 in / $25 out. The cost
 # tracker (Phase 4) computes spend from this table; a wrong rate makes the
