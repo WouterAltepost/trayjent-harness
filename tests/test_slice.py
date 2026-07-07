@@ -35,7 +35,13 @@ def _write_bars(data_dir, ticker, timeframe, closes, start, freq, volumes=None):
         volumes = [1000 + i for i in range(len(closes))]
     df = pd.DataFrame({
         "timestamp": ts,
-        "open": closes, "high": closes, "low": closes, "close": closes,
+        # high/low straddle close by ±1.0 so an OHLC column mix-up in a reader
+        # is detectable (degenerate high==low==close would hide it). Nothing
+        # asserts on `open`.
+        "open": closes,
+        "high": [c + 1.0 for c in closes],
+        "low": [c - 1.0 for c in closes],
+        "close": closes,
         "volume": volumes, "ticker": ticker, "timeframe": timeframe,
     })
     path = os.path.join(data_dir, timeframe, f"{ticker}.parquet")
@@ -186,6 +192,55 @@ def test_default_window_per_timeframe():
     assert len(sl.get_window("SPY", "1h", last_h)["close_prices"]) == config.PULSE_BARS
 
 
+# ── get_ohlc_window: aligned OHLC for the ATR (Steady redesign Step 1) ──
+def test_ohlc_window_aligned_and_agrees_with_get_window():
+    f = _setup()
+    df = f["spy_h"]
+    last_close = df["timestamp"].iloc[-1] + pd.Timedelta(hours=1)
+    n = 15
+    w = sl.get_ohlc_window("SPY", "1h", last_close, n_bars=n)
+    assert w["ticker"] == "SPY"
+    assert len(w["highs"]) == len(w["lows"]) == len(w["closes"]) == n
+    assert w["closes"][-1] == float(df["close"].iloc[-1]), "ends at the decision bar"
+    # Fixture straddle: high = close + 1, low = close - 1. A reader that
+    # grabbed the wrong column collapses one of these.
+    assert w["highs"] == [c + 1.0 for c in w["closes"]]
+    assert w["lows"] == [c - 1.0 for c in w["closes"]]
+    # Cross-check: the two slicers agree on identical args.
+    gw = sl.get_window("SPY", "1h", last_close, n_bars=n)
+    assert w["closes"] == gw["close_prices"], "ohlc closes must match get_window's"
+
+
+def test_ohlc_window_no_lookahead():
+    f = _setup()
+    df = f["spy_h"]
+    k = 500
+    start_k = df["timestamp"].iloc[k]
+    # At bar k's START it is still forming -> the window ends on bar k-1.
+    at_start = sl.get_ohlc_window("SPY", "1h", start_k, n_bars=15)
+    assert at_start["closes"][-1] == float(df["close"].iloc[k - 1]), \
+        "a still-forming bar must be excluded from the OHLC window"
+    assert at_start["highs"][-1] == float(df["high"].iloc[k - 1])
+    # At bar k's CLOSE (start + 1h) it is complete and included.
+    at_close = sl.get_ohlc_window("SPY", "1h", start_k + pd.Timedelta(hours=1), n_bars=15)
+    assert at_close["closes"][-1] == float(df["close"].iloc[k])
+
+
+def test_ohlc_window_floor_is_n_bars_not_min_rows():
+    f = _setup()
+    df = f["spy_30"]            # 12 stored bars, far below MIN_ROWS(300)
+    last_close = df["timestamp"].iloc[-1] + pd.Timedelta(minutes=30)
+    # 12 eligible bars cannot fill a 15-bar ATR window -> fail closed.
+    try:
+        sl.get_ohlc_window("SPY", "30m", last_close, n_bars=15)
+        assert False, "expected ValueError when eligible bars < n_bars"
+    except ValueError:
+        pass
+    # But the floor is n_bars itself, not MIN_ROWS: 12 bars fill a 12-bar ask.
+    w = sl.get_ohlc_window("SPY", "30m", last_close, n_bars=12)
+    assert len(w["closes"]) == 12
+
+
 # ── VIX as-of: latest close, 20MA None rule, regime ladder ──────────────
 def test_vix_latest_close_and_20ma_none():
     f = _setup()
@@ -230,7 +285,11 @@ if __name__ == "__main__":
     test_window_length_recency_and_order()
     test_floor_below_min_rows_raises()
     test_default_window_per_timeframe()
+    test_ohlc_window_aligned_and_agrees_with_get_window()
+    test_ohlc_window_no_lookahead()
+    test_ohlc_window_floor_is_n_bars_not_min_rows()
     test_vix_latest_close_and_20ma_none()
     test_vix_regime_ladder_boundaries()
     print("test_slice OK: lookahead (daily + intraday close-time), get_price_asof, "
-          "window length/recency, floor, default window, VIX as-of + regime ladder.")
+          "window length/recency, floor, default window, get_ohlc_window, "
+          "VIX as-of + regime ladder.")

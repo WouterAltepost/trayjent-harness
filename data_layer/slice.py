@@ -8,6 +8,9 @@ contract as of any decision timestamp T. Deliberately does NOT import
   ``{"ticker", "close_prices", "volumes"}`` dict, oldest->newest, ending at the
   last bar whose **close time** is ``<= as_of``. Honest about time: a bar that
   closes after T does not exist yet and is never included.
+- ``get_ohlc_window(ticker, timeframe, as_of, n_bars)`` -> aligned
+  ``{"ticker", "highs", "lows", "closes"}`` for the ATR trailing exit, same
+  no-lookahead rule, floor = n_bars itself (not MIN_ROWS).
 - ``get_price_asof(ticker, timeframe, as_of)`` -> the close of the latest bar
   whose close time is ``<= as_of`` (the decision-tf fill/exit price). No
   MIN_ROWS floor — a single-price lookup, not an indicator window.
@@ -143,6 +146,56 @@ def get_window(ticker: str, timeframe: str, as_of, n_bars: int = None) -> dict:
         "ticker": ticker,
         "close_prices": [float(p) for p in window["close"].tolist()],
         "volumes": [int(v) for v in window["volume"].tolist()],
+    }
+
+
+def get_ohlc_window(ticker: str, timeframe: str, as_of, n_bars: int) -> dict:
+    """Return aligned high/low/close lists as of ``as_of``, for the ATR.
+
+    Same no-lookahead path as :func:`get_window` (``_load`` -> ``_eligible``
+    -> ``tail(n_bars)``): only bars whose close time is ``<= as_of`` exist.
+    Pure reader — the ATR math lives in ``runner/atr.py``, not here.
+
+    Parameters
+    ----------
+    ticker, timeframe : str
+    as_of : str | datetime | pandas.Timestamp
+        Decision timestamp T.
+    n_bars : int
+        Exact window length required (typically ATR period + 1). No
+        per-timeframe default — ATR windows are not indicator windows.
+
+    Returns
+    -------
+    dict
+        ``{"ticker": str, "highs": [float], "lows": [float], "closes":
+        [float]}``, oldest->newest, ending at the decision bar, all of
+        length ``n_bars``.
+
+    Raises
+    ------
+    ValueError
+        If fewer than ``n_bars`` bars closed at or before T — a partial ATR
+        window would understate volatility, so fail closed. The floor is
+        ``n_bars`` itself, not ``MIN_ROWS`` (mirrors get_window's fail-closed
+        style at the window's own length).
+    """
+    df = _load(ticker, timeframe)
+    cutoff = _as_utc(as_of)
+
+    eligible = _eligible(df, timeframe, cutoff)
+    if len(eligible) < n_bars:
+        raise ValueError(
+            f"Insufficient history for {ticker} {timeframe} as of {cutoff}: "
+            f"{len(eligible)} bars closed <= T, need {n_bars} for a full ATR window"
+        )
+
+    window = eligible.tail(n_bars)
+    return {
+        "ticker": ticker,
+        "highs": [float(h) for h in window["high"].tolist()],
+        "lows": [float(v) for v in window["low"].tolist()],
+        "closes": [float(c) for c in window["close"].tolist()],
     }
 
 
