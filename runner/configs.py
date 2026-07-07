@@ -30,6 +30,8 @@ class RunConfig:
     start: datetime      # run window, inclusive (UTC)
     end: datetime        # run window, inclusive (UTC)
     mode: str            # "claude" | "rules_only"
+    sizing_config: dict = None  # None -> config.POSITION_SIZING; sweep runs
+                                # override via dataclasses.replace (frozen-safe)
 
 
 # Fixed per-preset fields (everything but start/end/mode). pulse_hourly and

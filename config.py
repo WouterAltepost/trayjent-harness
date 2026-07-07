@@ -83,7 +83,12 @@ PULSE_WATCHLIST = ["NVDA", "AMD", "TSLA", "META", "AMZN", "GOOGL"]
 STRATEGY_STEADY = {
     "name": "steady",
     "buy_threshold": 7,
+    # take_profit is UNUSED in the backtest once use_trailing_stop governs the
+    # exit pass below (live Steady still trades the 5% TP until go-live); kept
+    # so this dict stays a faithful live mirror.
     "take_profit": 0.05,
+    # stop_loss now serves as the trailing exit's hard-stop floor during the
+    # fresh phase (pre-breakeven handoff) and still feeds the sizing 2% clamp.
     "stop_loss": 0.03,
     "ma_short": 50,
     "ma_long": 200,
@@ -91,6 +96,12 @@ STRATEGY_STEADY = {
     "use_ema_short": False,
     "cash_safety_pct": 0.80,
     "watchlist": STEADY_WATCHLIST,
+    # Steady redesign Step 1: ATR trailing stop with hard-stop handoff replaces
+    # the fixed TP in the backtest exit pass. mult and period are the sweep
+    # dials; these are the pre-sweep defaults.
+    "use_trailing_stop": True,
+    "trailing_atr_mult": 3.0,
+    "atr_period": 22,
 }
 STRATEGY_PULSE = {
     "name": "pulse",

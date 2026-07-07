@@ -1,6 +1,7 @@
 """Orchestrator tests (brief Step 4) — the two L5 ordering invariants and the
 previous_score threading (L6), the subtleties that bit live and must be
-reproduced exactly.
+reproduced exactly. Plus the Steady trailing-exit branch and the sizing_config
+plumbing (Steady redesign Step 1, Commit 4).
 
 All synthetic + offline: a tmp DATA_DIR with SPY/^VIX/A..E daily bars and a FAKE
 score_batch, so the runner's orchestration is exercised without the scorers,
@@ -9,6 +10,7 @@ deterministic and the invariants are observable in portfolio state.
 
     python tests/test_runner.py
 """
+import dataclasses
 import os
 import sys
 import tempfile
@@ -28,7 +30,10 @@ from runner.run import run_backtest
 # 302 daily bars: warm-up (MIN_ROWS=300) clears at index 299, so decision marks
 # are indices 299, 300, 301. Closes are flat 100 (indicator values are unused —
 # the fake scorer drives decisions); only A jumps to 110 at index 300 to fire a
-# +10% take-profit on the second tick.
+# +10% take-profit on the second tick. Trailing-branch paths: TR rises to 112
+# at 300 then falls to 104 at 301 (trailing stop fires on the pullback); HS
+# drops to 96 at 300 (through the 3% hard floor while its trailing level is
+# still sub-entry).
 _FIXTURE = {}
 _TICKERS = ["A", "B", "C", "D", "E"]
 _N = 302
@@ -60,6 +65,12 @@ def _setup():
         if t == "A":
             closes[300] = 110.0                          # +10% -> take-profit
         _write(data_dir, t, closes)
+    tr = [100.0] * _N
+    tr[300], tr[301] = 112.0, 104.0                      # run up, pull back
+    _write(data_dir, "TR", tr)
+    hs = [100.0] * _N
+    hs[300] = 96.0                                       # straight through -3%
+    _write(data_dir, "HS", hs)
     _FIXTURE.update({"dir": data_dir, "ts": ts})
     return _FIXTURE
 
@@ -77,11 +88,18 @@ def _strategy(watchlist):
     }
 
 
-def _run_config(watchlist, end_index):
+def _trailing_strategy(watchlist):
+    """Steady-shaped strategy with the redesign's trailing exit enabled. Small
+    dials (ATR period 3, mult 1.0) so the 302-bar fixture can move the stop."""
+    return dict(_strategy(watchlist),
+                use_trailing_stop=True, trailing_atr_mult=1.0, atr_period=3)
+
+
+def _run_config(watchlist, end_index, strategy=None):
     f = _setup()
     end = f["ts"][end_index]                              # daily close instant
     return RunConfig(
-        name="steady", strategy=_strategy(watchlist),
+        name="steady", strategy=strategy or _strategy(watchlist),
         indicator_tf="1d", indicator_bars=300, decision_tf="1d", cadence="daily",
         start=pd.Timestamp("2000-01-01", tz="UTC"), end=end, mode="rules_only",
     )
@@ -196,10 +214,81 @@ def test_previous_score_threaded_and_omitted_on_cold_start():
     assert second_signal_A["previous_score"] == 5, "prior tick's score threaded in"
 
 
+# ── Steady redesign Step 1: the trailing branch replaces the fixed TP ───
+def test_steady_trailing_replaces_take_profit():
+    """TR sits at +12% on tick 1 — past the old 5% TP — and does NOT sell;
+    the pullback to 104 then crosses the ratcheted trailing level
+    (112 - 1.0 * ATR(3) of 20/3 ≈ 105.33) -> SELL (TRAILING STOP). HS falls
+    to 96, through the 97.0 hard floor, while its trailing level is still
+    sub-entry -> SELL (STOP LOSS) via the fresh-phase handoff."""
+    wl = ["TR", "HS"]
+    rc = _run_config(wl, end_index=301, strategy=_trailing_strategy(wl))
+    fake = FakeScorer([{"TR": 10, "HS": 10}])            # buy both @100 on tick 0
+    res = run_backtest(rc, score_batch=fake)
+
+    reasons = {t.ticker: t.exit_reason for t in res.closed_trades}
+    assert reasons == {"TR": "SELL (TRAILING STOP)", "HS": "SELL (STOP LOSS)"}
+    assert not any(t.exit_reason == "SELL (TAKE PROFIT)" for t in res.closed_trades)
+
+    f = _setup()
+    tr = next(t for t in res.closed_trades if t.ticker == "TR")
+    # The +12% tick did not exit (old Steady's TP would have): TR left on the
+    # NEXT tick at the 104 close — the winner ran past the old 5% cap.
+    assert tr.exit_ts == f["ts"][301] and tr.exit_price == 104.0
+    assert round(tr.realized_pct, 1) == 4.0
+    hs = next(t for t in res.closed_trades if t.ticker == "HS")
+    assert hs.exit_ts == f["ts"][300] and hs.exit_price == 96.0
+
+
+def test_pulse_path_unchanged_tp_and_max_hold():
+    """A strategy WITHOUT use_trailing_stop keeps the exact TP/SL/max-hold
+    path — the trailing branch must not leak into Pulse. A's +10% still
+    take-profits; flat B ages out (bar 299 is a Friday, so the Monday tick is
+    72h later, past the 48h max hold)."""
+    wl = ["A", "B"]
+    pulse = {
+        "name": "pulse", "buy_threshold": 6,
+        "take_profit": 0.05, "stop_loss": 0.03, "max_hold_hours": 48,
+        "cash_safety_pct": 0.80, "watchlist": wl,
+    }
+    rc = _run_config(wl, end_index=301, strategy=pulse)
+    fake = FakeScorer([{"A": 10, "B": 10}])
+    res = run_backtest(rc, score_batch=fake)
+
+    reasons = {t.ticker: t.exit_reason for t in res.closed_trades}
+    assert reasons == {"A": "SELL (TAKE PROFIT)", "B": "SELL (MAX HOLD)"}
+    assert not any(t.exit_reason == "SELL (TRAILING STOP)" for t in res.closed_trades)
+
+
+# ── sizing_config plumbing: RunConfig override vs POSITION_SIZING default ─
+def test_sizing_config_override_and_default_fallback():
+    saved = config.INITIAL_CAPITAL
+    config.INITIAL_CAPITAL = 10_000.0
+    try:
+        rc = _run_config(["C"], end_index=299)           # single tick
+        base = run_backtest(rc, score_batch=FakeScorer([{"C": 10}]))
+        # sizing_config=None falls back to config.POSITION_SIZING:
+        # multiplier 4 * 0.05 * 10k = 2000.
+        assert base.portfolio._positions["C"]["notional"] == 2000.0
+
+        halved = dict(config.POSITION_SIZING, base_pct_per_score=0.025)
+        rc2 = dataclasses.replace(rc, sizing_config=halved)
+        override = run_backtest(rc2, score_batch=FakeScorer([{"C": 10}]))
+        # Same run, one dial overridden: 4 * 0.025 * 10k = 1000 — the override
+        # reached the cascade through the RunConfig.
+        assert override.portfolio._positions["C"]["notional"] == 1000.0
+    finally:
+        config.INITIAL_CAPITAL = saved
+
+
 if __name__ == "__main__":
     test_held_snapshot_blocks_same_tick_rebuy()
     test_pv_anchor_fixed_and_cash_decrements_per_buy()
     test_buy_sized_off_pre_exit_cash_not_sale_proceeds()
     test_previous_score_threaded_and_omitted_on_cold_start()
+    test_steady_trailing_replaces_take_profit()
+    test_pulse_path_unchanged_tp_and_max_hold()
+    test_sizing_config_override_and_default_fallback()
     print("test_runner OK: held-snapshot rebuy block, PV anchor fixed + cash "
-          "decrements per buy, pre-exit cash sizing, previous_score threaded/omitted.")
+          "decrements per buy, pre-exit cash sizing, previous_score threaded/omitted, "
+          "trailing branch (no TP), pulse path unchanged, sizing_config override.")

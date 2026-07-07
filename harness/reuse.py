@@ -38,6 +38,7 @@ from tools.breadth import trend_anchor, compute_breadth  # noqa: E402
 from tools.vix import classify_vix_regime  # noqa: E402
 from tools.exit_rules import (  # noqa: E402
     evaluate_price_exit,
+    evaluate_trailing_exit,
     should_force_close_for_max_hold,
 )
 from tools.sizing import compute_position_size  # noqa: E402
@@ -63,6 +64,7 @@ __all__ = [
     "compute_breadth",
     "classify_vix_regime",
     "evaluate_price_exit",
+    "evaluate_trailing_exit",
     "should_force_close_for_max_hold",
     "compute_position_size",
     "build_scoring_prompt",

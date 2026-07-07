@@ -3,9 +3,9 @@
 A faithful re-orchestration of live ``workflow.run()`` with live I/O swapped for
 harness primitives. It is orchestration + state threading ONLY — every decision
 primitive already exists via the reuse shim (``evaluate_price_exit``,
-``should_force_close_for_max_hold``, ``decide_buy_action``, ``compute_indicators*``,
-``compute_breadth``) and the portfolio simulator. Nothing here re-implements
-scoring, sizing, or exit logic.
+``evaluate_trailing_exit``, ``should_force_close_for_max_hold``,
+``decide_buy_action``, ``compute_indicators*``, ``compute_breadth``) and the
+portfolio simulator. Nothing here re-implements scoring, sizing, or exit logic.
 
 Per decision ``as_of`` (from ``runner.schedule``):
   1. Price every watchlist ticker at the decision tf (no-lookahead slicer).
@@ -16,7 +16,10 @@ Per decision ``as_of`` (from ``runner.schedule``):
      ONCE; ``ctx["portfolio_value"]`` is that fixed snapshot while ``ctx["cash"]``
      is a pre-exit cash snapshot decremented per buy (mirrors live
      ``current_cash_local``) so sequential buys in one tick see shrinking cash.
-  4. Exit pass: ``evaluate_price_exit`` / max-hold → ``portfolio.sell``.
+  4. Exit pass → ``portfolio.sell``. Steady (``use_trailing_stop``): ratchet
+     high-water, then ``evaluate_trailing_exit`` with a per-position ATR (hard
+     stop governs on thin/zero ATR). Pulse: ``evaluate_price_exit`` / max-hold,
+     unchanged.
   5. Indicators on the indicator tf; thread ``previous_score`` (L6).
   6. Market context (VIX as-of + breadth); score (mode switch, L8).
   7. BUY cascade: ``decide_buy_action`` → ``portfolio.buy``.
@@ -38,12 +41,13 @@ import os
 from dataclasses import dataclass
 
 import config
-from data_layer.slice import get_window, get_price_asof, get_vix_asof
+from data_layer.slice import get_window, get_ohlc_window, get_price_asof, get_vix_asof
 from harness.reuse import (
     compute_indicators,
     compute_indicators_pulse,
     compute_breadth,
     evaluate_price_exit,
+    evaluate_trailing_exit,
     should_force_close_for_max_hold,
     decide_buy_action,
     build_scoring_prompt,
@@ -53,6 +57,7 @@ from harness.reuse import (
 from scoring.rules_only import score_rules_only
 from scoring.cost import CostTracker, CostCeilingExceeded
 from simulator.portfolio import Portfolio
+from runner.atr import compute_atr
 from runner.schedule import decision_points
 
 # Neutral cascade inputs for the modeled omissions (L7). A never-tripped breaker
@@ -124,6 +129,13 @@ def run_backtest(run_config, *, score_batch=None, cache=None) -> RunResult:
     tp_pct = strategy["take_profit"] * 100.0
     sl_pct = strategy["stop_loss"] * 100.0
     max_hold_hours = strategy.get("max_hold_hours")
+    # Steady redesign: trailing-exit dials (absent -> None for Pulse). sl_pct
+    # doubles as the trailing exit's hard-stop percent during the fresh phase.
+    use_trailing = strategy.get("use_trailing_stop")
+    trailing_mult = strategy.get("trailing_atr_mult")
+    atr_period = strategy.get("atr_period")
+    # Sizing dials: RunConfig override (sweep runs) or the frozen live mirror.
+    sizing_config = run_config.sizing_config or config.POSITION_SIZING
 
     cost_tracker = None
     if score_batch is None:
@@ -157,15 +169,36 @@ def run_backtest(run_config, *, score_batch=None, cache=None) -> RunResult:
 
         # Step 1: exit pass over open positions at the decision-tf price.
         # position_dicts() returns a fresh list, so selling mid-loop is safe.
-        for pos in portfolio.position_dicts(prices):
-            ticker = pos["ticker"]
-            reason = evaluate_price_exit(pos["unrealized_pct"], tp_pct, sl_pct)
-            if reason is None and max_hold_hours:
-                if should_force_close_for_max_hold(
-                        portfolio.filled_at(ticker), max_hold_hours, now=as_of):
-                    reason = "SELL (MAX HOLD)"
-            if reason:
-                portfolio.sell(ticker, prices[ticker], as_of, reason)
+        if use_trailing:
+            # Steady redesign: ratchet peaks BEFORE evaluating, so a new high
+            # this bar raises the trailing level this bar (a fresh peak alone
+            # never triggers — current == high_water sits above the level).
+            portfolio.update_high_water(prices)
+            for pos in portfolio.position_dicts(prices):
+                ticker = pos["ticker"]
+                try:
+                    ohlc = get_ohlc_window(ticker, decision_tf, as_of, atr_period + 1)
+                    atr = compute_atr(ohlc["highs"], ohlc["lows"], ohlc["closes"], atr_period)
+                except (ValueError, FileNotFoundError):
+                    # Thin/missing OHLC history: atr=None -> the primitive's
+                    # guard governs by the hard stop alone, so a held position
+                    # always keeps a floor and is never stranded.
+                    atr = None
+                reason = evaluate_trailing_exit(
+                    pos["current_price"], pos["avg_entry_price"],
+                    pos["high_water"], atr, trailing_mult, sl_pct)
+                if reason:
+                    portfolio.sell(ticker, prices[ticker], as_of, reason)
+        else:
+            for pos in portfolio.position_dicts(prices):
+                ticker = pos["ticker"]
+                reason = evaluate_price_exit(pos["unrealized_pct"], tp_pct, sl_pct)
+                if reason is None and max_hold_hours:
+                    if should_force_close_for_max_hold(
+                            portfolio.filled_at(ticker), max_hold_hours, now=as_of):
+                        reason = "SELL (MAX HOLD)"
+                if reason:
+                    portfolio.sell(ticker, prices[ticker], as_of, reason)
 
         # Steps 3-4: indicators on the indicator tf + previous_score threading.
         signals = []
@@ -212,7 +245,7 @@ def run_backtest(run_config, *, score_batch=None, cache=None) -> RunResult:
                     "cash": cash_local,                 # pre-exit snapshot, decrements per buy
                     "strategy": strategy,
                     "indicators": indicators_by_ticker.get(ticker, {}),
-                    "sizing_config": config.POSITION_SIZING,
+                    "sizing_config": sizing_config,
                     "buys_disabled": False,
                     "now": as_of,
                 })
