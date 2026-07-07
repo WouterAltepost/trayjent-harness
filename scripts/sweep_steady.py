@@ -5,9 +5,10 @@ in-sample window in --mode claude. The scoring INPUTS are unchanged from the
 Stage E runs that built cache/scoring.db (PROMPT_VERSION v9.5, same watchlist,
 SCORING_MODEL claude-opus-4-7, and none of the swept dials enter the prompt),
 so every Claude call is a cache hit and the sweep costs $0. That claim is
-ENFORCED, not assumed: a short canary run must show zero API calls before the
-grid starts, and every combo re-asserts zero spend — any miss aborts the sweep
-loudly (cache drift; see the Step 1 plan's PF-4).
+ENFORCED, not assumed: a short canary run over a PREFIX of the grid window
+must show zero API calls before the grid starts, and every combo re-asserts
+zero spend — any miss aborts the sweep loudly (cache drift; see the Step 1
+plan's PF-4).
 
 Two-stage plan (S1-9): Stage 1 (this file's default) fixes concentration at a
 moderate more-invested default and sweeps the exit dials; Stage 2 (commented
@@ -44,8 +45,13 @@ from runner.run import run_backtest
 # scoring cache covers every decision tick. Both sealed Steady slabs
 # (2016-2019, 2020-2021) lie outside it; _check_oos re-verifies below.
 START, END = "2022-01-01", "2026-06-24"
-# One cheap month for the canary run that gates the whole grid.
-CANARY_START, CANARY_END = "2023-01-01", "2023-02-01"
+# The canary is a one-month PREFIX of the grid window, never an interior
+# slice: previous_score threading (L6) makes prompts start-dependent, so a
+# canary starting anywhere but START cold-starts the chain and produces
+# prompt bytes the cache has never seen — a guaranteed total miss (false
+# "drift" abort) on an otherwise fully-cached window.
+CANARY_START, CANARY_END = START, "2022-02-01"
+assert CANARY_START == START, "canary must share the grid START (L6 prefix invariant)"
 
 # ── Preserver baseline (in-sample), results/phase6_stageE_summary.md ─────
 # The validated capital preserver the grower must beat on growth while
