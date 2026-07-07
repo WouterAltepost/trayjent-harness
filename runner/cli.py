@@ -19,30 +19,31 @@ from runner.run import run_backtest
 from runner.metrics import compute_metrics
 from runner.output import build_output, to_json
 
-# Sealed OOS window per preset (L11). pulse_30min has no entry: its ~60d of 30m
-# data lies inside the Pulse quarter by nature and it is mechanical-fidelity only
+# Sealed OOS windows per preset (L11), a list per preset — Steady carries the
+# consumed 2020-2021 slab (stays fenced) plus the fresh 2016-2019 slab for the
+# grower redesign's one read. pulse_30min has no entry: its ~60d of 30m data
+# lies inside the Pulse quarter by nature and it is mechanical-fidelity only
 # (never tuned from), so there is nothing to guard — the discipline is "don't
 # tune," not a date fence.
 _SEALED = {
-    "steady": config.OOS_STEADY,
-    "pulse_hourly": config.OOS_PULSE_HOURLY,
+    "steady": [config.OOS_STEADY, config.OOS_STEADY_2016],
+    "pulse_hourly": [config.OOS_PULSE_HOURLY],
 }
 
 
 def _check_oos(run_config, allow_sealed: bool) -> None:
-    """Refuse a run whose window overlaps the preset's sealed OOS range (L11),
-    unless explicitly overridden for the one post-Phase-6 read."""
-    sealed = _SEALED.get(run_config.name)
-    if sealed is None:
-        return
-    s_start = _to_utc_ts(sealed[0])
-    s_end = _to_utc_ts(sealed[1], end=True)
-    if run_config.start <= s_end and run_config.end >= s_start and not allow_sealed:
-        raise SystemExit(
-            f"refusing {run_config.name} over {run_config.start.date()}..{run_config.end.date()}: "
-            f"overlaps the sealed OOS window {sealed[0]}..{sealed[1]} (L11). Sealed ranges are "
-            f"never passed during dev; use --allow-sealed only for the one post-Phase-6 read."
-        )
+    """Refuse a run whose window overlaps any of the preset's sealed OOS
+    ranges (L11), unless explicitly overridden for a deliberate one-time
+    sealed read."""
+    for sealed in _SEALED.get(run_config.name, ()):
+        s_start = _to_utc_ts(sealed[0])
+        s_end = _to_utc_ts(sealed[1], end=True)
+        if run_config.start <= s_end and run_config.end >= s_start and not allow_sealed:
+            raise SystemExit(
+                f"refusing {run_config.name} over {run_config.start.date()}..{run_config.end.date()}: "
+                f"overlaps the sealed OOS window {sealed[0]}..{sealed[1]} (L11). Sealed ranges are "
+                f"never passed during dev; use --allow-sealed only for a deliberate one-time sealed read."
+            )
 
 
 def main(argv=None) -> int:

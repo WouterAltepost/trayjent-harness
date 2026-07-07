@@ -153,12 +153,15 @@ AUTO_ADJUST = True
 
 # ── Sealed out-of-sample windows (Phase 5 L11) ──────────────────────────
 # NEVER pass these ranges to a development run. The runner takes an explicit
-# [start, end]; these slices are simply never requested until the one
-# post-Phase-6 read. Each is (start, end) inclusive, ISO date.
-#   Steady (daily):       a 2020-2021 slab.
+# [start, end]; each sealed slice is read exactly once, deliberately, via
+# --allow-sealed. Each is (start, end) inclusive, ISO date.
+#   Steady (daily):       a 2020-2021 slab (consumed by the Stage E read —
+#                         stays fenced) + a fresh 2016-2019 slab reserved for
+#                         the grower redesign's one validation read (Step 1).
 #   Pulse-hourly (edge):  the most recent quarter.
 # Pulse-30min is mechanical fidelity only (≈60d, overlaps the hourly quarter
 # by nature) — do not tune any strategy parameter from it, and keep the hourly
 # OOS quarter untouched.
 OOS_STEADY = ("2020-01-01", "2021-12-31")
+OOS_STEADY_2016 = ("2016-01-01", "2019-12-31")
 OOS_PULSE_HOURLY = ("2026-04-01", "2026-06-24")
