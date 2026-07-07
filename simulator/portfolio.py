@@ -14,7 +14,10 @@ Design invariants (Phase 3 locked decisions):
   always take a {ticker: price} map. No stored "current price".
 - L5 Idealized fills: fill at the raw close, zero fees, zero slippage. Costs
   enter only through _fill_price.
-- L7 position_dicts emits exactly the live keys, unrealized_pct in percent.
+- L7 position_dicts emits the live keys verbatim (unrealized_pct in percent)
+  plus harness-only high_water, which the trailing exit consumes. Live Alpaca
+  does not return a high-water field; live will track it via its own persisted
+  state when the trailing stop is wired live (out of scope for the harness).
 - L10 Long-only: sell() with no open position raises.
 """
 from dataclasses import dataclass
@@ -48,7 +51,7 @@ class Portfolio:
         self._cash = float(starting_cash)
         self.fees_bps = float(fees_bps)
         self.slippage_bps = float(slippage_bps)
-        # ticker -> {entry_price, qty, entry_ts, notional, meta}. One lot each (L3).
+        # ticker -> {entry_price, high_water, qty, entry_ts, notional, meta}. One lot each (L3).
         self._positions: dict[str, dict] = {}
         self.closed_trades: list[ClosedTrade] = []
 
@@ -79,6 +82,7 @@ class Portfolio:
         self._cash -= notional
         self._positions[ticker] = {
             "entry_price": fill,
+            "high_water": fill,  # peak since entry; ratcheted by update_high_water()
             "qty": qty,
             "entry_ts": ts,
             "notional": notional,
@@ -117,6 +121,14 @@ class Portfolio:
         self.closed_trades.append(trade)
         return trade
 
+    def update_high_water(self, prices: dict) -> None:
+        """Ratchet each held position's high_water up to the passed price map:
+        max(stored, prices[ticker]). Never lowers it. A held ticker missing
+        from the map fails loud via _price_of — the same rule as
+        portfolio_value / position_dicts, never silently skip a held lot."""
+        for ticker, pos in self._positions.items():
+            pos["high_water"] = max(pos["high_water"], self._price_of(ticker, prices))
+
     # ── Reads (no mutation) ─────────────────────────────────────────────
     def held_tickers(self) -> set:
         return set(self._positions)
@@ -140,9 +152,10 @@ class Portfolio:
             ) from None
 
     def position_dicts(self, prices: dict) -> list:
-        """Open positions in the exact live get_open_positions shape (L7),
-        valued at `prices`. unrealized_pct is in percent: (price-entry)/entry*100,
-        matching positions.py:38 so the runner's exit loop is a verbatim mirror."""
+        """Open positions in the live get_open_positions shape (L7) plus the
+        harness-only high_water key, valued at `prices`. unrealized_pct is in
+        percent: (price-entry)/entry*100, matching positions.py:38 so the
+        runner's exit loop is a verbatim mirror of the live keys."""
         out = []
         for ticker, pos in self._positions.items():
             price = self._price_of(ticker, prices)
@@ -156,6 +169,7 @@ class Portfolio:
                 "market_value": qty * price,
                 "unrealized_pl": (price - entry) * qty,
                 "unrealized_pct": (price - entry) / entry * 100.0,
+                "high_water": pos["high_water"],  # harness-only (L7 note)
             })
         return out
 

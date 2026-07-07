@@ -57,9 +57,12 @@ def test_hand_calc_oracle():
     assert _close(dicts["B"]["unrealized_pl"], -900.0)       # (48.50-50)*600
     assert _close(dicts["A"]["market_value"], 21_000.0)      # 200*105
     assert _close(dicts["A"]["avg_entry_price"], 100.0)
+    # Valuation alone never ratchets high_water (L4): still the entry peak
+    # even though A is marked at 105.
+    assert _close(dicts["A"]["high_water"], 100.0)
     assert dicts["A"].keys() == {
         "ticker", "qty", "avg_entry_price", "current_price",
-        "market_value", "unrealized_pl", "unrealized_pct",
+        "market_value", "unrealized_pl", "unrealized_pct", "high_water",
     }
     # PV with the marked prices: 50k cash + 21k + 29.1k = 100.1k.
     assert _close(p.portfolio_value({"A": 105.0, "B": 48.50}), 100_100.0)
@@ -171,6 +174,61 @@ def test_filled_at_and_equity_point():
     assert pt == {"ts": T0, "portfolio_value": 100_000.0, "cash": 90_000.0, "n_positions": 1}
 
 
+# ── High-water mark (Steady redesign Step 1, Commit 2) ─────────────────
+def test_high_water_starts_at_entry_fill():
+    p = Portfolio(100_000.0)
+    p.buy("A", 10_000.0, 100.0, T0)
+    [d] = p.position_dicts({"A": 100.0})
+    assert _close(d["high_water"], 100.0)               # zero-cost fill == buy price
+
+
+def test_high_water_ratchets_up():
+    p = Portfolio(100_000.0)
+    p.buy("A", 10_000.0, 100.0, T0)
+    p.update_high_water({"A": 108.0})
+    [d] = p.position_dicts({"A": 105.0})
+    assert _close(d["high_water"], 108.0)               # stored peak, not the mark price
+
+
+def test_high_water_never_drops():
+    p = Portfolio(100_000.0)
+    p.buy("A", 10_000.0, 100.0, T0)
+    p.update_high_water({"A": 108.0})
+    p.update_high_water({"A": 95.0})
+    [d] = p.position_dicts({"A": 95.0})
+    assert _close(d["high_water"], 108.0)
+
+
+def test_high_water_tracks_running_peak():
+    p = Portfolio(100_000.0)
+    p.buy("A", 10_000.0, 100.0, T0)
+    for px, expected in ((104.0, 104.0), (98.0, 104.0), (110.0, 110.0)):
+        p.update_high_water({"A": px})
+        [d] = p.position_dicts({"A": px})
+        assert _close(d["high_water"], expected)
+
+
+def test_update_high_water_missing_held_ticker_raises():
+    p = Portfolio(100_000.0)
+    p.buy("A", 10_000.0, 100.0, T0)
+    try:
+        p.update_high_water({})
+        assert False, "expected KeyError for held ticker missing from price map"
+    except KeyError as e:
+        assert "A" in str(e)
+
+
+def test_high_water_is_per_position():
+    p = Portfolio(100_000.0)
+    p.buy("A", 10_000.0, 100.0, T0)
+    p.buy("B", 10_000.0, 50.0, T0)
+    p.update_high_water({"A": 120.0, "B": 51.0})        # A peaks here...
+    p.update_high_water({"A": 110.0, "B": 55.0})        # ...B peaks here
+    dicts = {d["ticker"]: d for d in p.position_dicts({"A": 110.0, "B": 55.0})}
+    assert _close(dicts["A"]["high_water"], 120.0)
+    assert _close(dicts["B"]["high_water"], 55.0)
+
+
 if __name__ == "__main__":
     test_hand_calc_oracle()
     test_buy_while_held_raises()
@@ -181,4 +239,10 @@ if __name__ == "__main__":
     test_idealized_fill_is_raw_close()
     test_ledger_meta_and_exit_reason()
     test_filled_at_and_equity_point()
-    print("test_portfolio OK: hand-calc oracle, guards, fractional, zero-fee identity, ledger/meta.")
+    test_high_water_starts_at_entry_fill()
+    test_high_water_ratchets_up()
+    test_high_water_never_drops()
+    test_high_water_tracks_running_peak()
+    test_update_high_water_missing_held_ticker_raises()
+    test_high_water_is_per_position()
+    print("test_portfolio OK: hand-calc oracle, guards, fractional, zero-fee identity, ledger/meta, high-water.")
