@@ -37,6 +37,11 @@ _GAP_DAYS = {
     # fits none; scripts/pull_shortvol_data.py prints exact per-series
     # coverage instead.
     "shortvol": 7,
+    # Rotor sleeve (data/rotor): 24/7 crypto, no exchange calendar — ANY gap
+    # beyond the 1-day bar spacing is missing data, never a holiday. No
+    # _ROW_BANDS entry (listing dates vary per coin); the pull script reports
+    # exact per-coin coverage.
+    "rotor": 1,
 }
 
 

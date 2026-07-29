@@ -201,6 +201,68 @@ CALM_COST_BPS_PER_SIDE = 5.0
 # OOS start (OOS_SHORTVOL below). ALL parameter selection happens here.
 CALM_TUNING = ("2011-10-04", "2021-12-31")
 
+# ── Rotor sleeve: crypto data foundation (data-only, no strategy yet) ───
+# Weekly crypto momentum rotation with a BTC trend gate. Data lives in its
+# own directory; the frozen Steady/Pulse windows and cache/ are untouched.
+ROTOR_DATA_DIR = os.path.join(DATA_DIR, "rotor")
+# Source: Alpaca crypto market data v1beta3 — DELIBERATE: Alpaca is the venue
+# Rotor would trade, so its bars embed the venue's pricing. The bars endpoint
+# is free and keyless (verified 2026-07-29: HTTP 200 with no auth headers).
+ROTOR_BARS_URL = "https://data.alpaca.markets/v1beta3/crypto/us"
+# 24/7 BAR CONVENTION (verified 2026-07-29): Alpaca daily crypto bars are
+# keyed at 00:00:00Z and cover the UTC calendar day [00:00, 24:00). There is
+# no exchange calendar — a Rotor "day" is that UTC bar, never an NYSE
+# session. Stored timestamps are the bar's CLOSE instant (key + 24h), same
+# no-lookahead rule as every other sleeve: a bar exists only after its
+# window completes. A missing day is ALWAYS a data problem, never a holiday
+# — sanity demands full 7-day weeks.
+# UNIVERSE DISCOVERY, keyless: the trading-API assets endpoint needs keys
+# (verified: 401 keyless), so the current tradable set is discovered by
+# querying latest/bars with the hand-maintained candidate superset below —
+# Alpaca silently omits symbols it does not serve. LIMITATION: a coin Alpaca
+# adds that is not in this list is invisible until the list is extended;
+# revisit when Alpaca announces additions. All pairs are {COIN}/USD.
+ROTOR_CANDIDATES = [
+    "AAVE", "ADA", "ALGO", "APT", "ARB", "ATOM", "AVAX", "BAT", "BCH", "BONK",
+    "BTC", "COMP", "CRV", "DAI", "DOGE", "DOT", "ETC", "ETH", "FIL", "GRT",
+    "HBAR", "ICP", "INJ", "JUP", "LDO", "LINK", "LTC", "MANA", "MATIC", "MKR",
+    "NEAR", "ONDO", "OP", "PAXG", "PEPE", "POL", "PYUSD", "RENDER", "SAND",
+    "SEI", "SHIB", "SKL", "SNX", "SOL", "SUI", "SUSHI", "TIA", "TON", "TRUMP",
+    "TRX", "TUSD", "UNI", "USDC", "USDG", "USDT", "WIF", "XLM", "XRP", "XTZ",
+    "YFI",
+]
+# Stablecoins are excluded from the universe (momentum on a peg is noise).
+ROTOR_STABLECOINS = {"USDT", "USDC", "DAI", "TUSD", "BUSD", "PYUSD", "USDG",
+                     "USDP", "GUSD", "EURC"}
+# Excluded by DECISION, not by rule: PAXG is a gold-backed token — a
+# commodity proxy, not crypto momentum — and carries a 968-day
+# delist->relist gap on the venue.
+ROTOR_EXCLUDED = {"PAXG"}
+# Delisted pairs pulled DELIBERATELY alongside the live universe (Alpaca
+# serves their full history keylessly — see the survivorship note above):
+# these five died on the venue (the June-2023 SEC wave; MKR 2025-09). They
+# exist to KILL survivorship bias: the backtest's point-in-time universe
+# sees them as tradable during their listing windows and gone afterward.
+# The listing windows are DERIVED from the stored bars
+# (data_layer.rotor.listing_windows) so the map can never drift from data.
+ROTOR_DELISTED = ("ALGO", "MATIC", "MKR", "NEAR", "TRX")
+# SURVIVORSHIP BIAS, stated honestly: the universe is Alpaca's CURRENT list,
+# so coins they delisted are excluded from any backtest built on this data.
+# That is a KNOWN UPWARD BIAS on historical performance. Accepted for v1
+# because Rotor only ever holds top-liquidity names — but any backtest result
+# on this data must carry this caveat. Two facts learned at the first pull
+# (2026-07-29) that a v2 could use to shrink the bias: (a) latest/bars serves
+# STALE bars for delisted pairs (observed: ALGO, MATIC, NEAR, TRX ended
+# 2023; MKR 2025-09), which is why discovery filters by bar recency; (b)
+# Alpaca serves delisted pairs' full history keylessly, so their series could
+# be re-added deliberately later. Relatedly, currently-listed coins can carry
+# DELIST->RELIST gaps (SOL 2023-06..2024-08, PAXG 2023-06..2026-02): venue
+# tradability windows, not data corruption — the strategy step must never
+# hold a coin across one or treat a cross-gap return as a daily return.
+# Fees, pinned NOW so the backtest step cannot forget them: Alpaca crypto
+# tier-1 (lowest volume tier) per-side rates.
+ROTOR_ALPACA_CRYPTO_FEES = {"taker": 0.0025, "maker": 0.0015}
+
 # ── Sealed out-of-sample windows (Phase 5 L11) ──────────────────────────
 # NEVER pass these ranges to a development run. The runner takes an explicit
 # [start, end]; each sealed slice is read exactly once, deliberately, via
