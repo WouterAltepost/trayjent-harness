@@ -260,8 +260,11 @@ def main(argv=None) -> int:
         bt_in = [t for t in bt_trades if lo <= t["entry_d"] <= hi]
         bt_exit_in = [t for t in bt_trades if lo <= t["exit_d"] <= hi]
 
+        # Scored rows on closed days (weekend/holiday runs log MARKET CLOSED
+        # with scores) are not decisions — excluded per the method note.
         live_days = sorted({r["dt"].date() for r in dated
                             if lo <= r["dt"].date() <= hi and r["Score"]
+                            and "MARKET CLOSED" not in r["Action"]
                             and r["dt"].strftime("%H:%M") >= OPEN_UTC})
         bt_days_in = [d for d in bt_days if lo_s <= d <= hi_s]
         md.append(f"Decision days: backtest {len(bt_days_in)}, live {len(live_days)} "
@@ -429,11 +432,31 @@ def main(argv=None) -> int:
                   f"decision price). Once-daily exit evaluation decides on a "
                   f"stale close and fills at the next open day (GAP-3 in the "
                   f"wild).\n")
+    # An unmatched BUY is only an anomaly if the position is NOT simply still
+    # open: the ticker's latest BUY whose final scored row says ALREADY HELD
+    # is an open position at export end, not a ledger problem.
+    last_action, last_buy = {}, {}
+    for r in dated:
+        if r["Score"]:
+            last_action[r["Ticker"]] = r["Action"]
+    for b in buys:
+        if b["ticker"] not in last_buy or b["dt"] > last_buy[b["ticker"]]:
+            last_buy[b["ticker"]] = b["dt"]
+    open_at_end = [b for b in unmatched_buys
+                   if b["dt"] == last_buy[b["ticker"]]
+                   and last_action.get(b["ticker"]) == "SKIP (ALREADY HELD)"]
+    if open_at_end:
+        md.append("- **Open positions at export end** (no SELL row because "
+                  "still held — final scored row is ALREADY HELD): "
+                  + "; ".join(f"{b['ticker']} BUY {b['dt'].date()}"
+                              for b in open_at_end) + ".\n")
     for b in unmatched_buys:
+        if b in open_at_end:
+            continue
         md.append(f"- **Ledger integrity:** {b['ticker']} BUY "
-                  f"{b['dt'].date()} has no subsequent SELL row in the "
-                  f"export (position later re-bought or state lost without a "
-                  f"logged close — check Sheets write failures around the "
+                  f"{b['dt'].date()} has no subsequent SELL row and the "
+                  f"position is not held at export end (state lost or close "
+                  f"unlogged — check Sheets write failures around the "
                   f"missing-run days).\n")
 
     md.append("## Interpretation\n\n_(hand-written)_\n")
