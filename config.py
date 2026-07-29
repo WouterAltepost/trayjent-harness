@@ -155,6 +155,44 @@ THIRTYMIN_PERIOD = "60d"
 # deterministic regardless of the installed yfinance default.
 AUTO_ADJUST = True
 
+# ── Shortvol sleeve: data foundation (data-only, no strategy logic yet) ──
+# The shortvol series live in their own directory, fully separate from the
+# frozen Steady/Pulse windows in data/{1d,1h,30m} — the shortvol pull never
+# reads or rewrites those, and nothing here touches cache/.
+SHORTVOL_DATA_DIR = os.path.join(DATA_DIR, "shortvol")
+# ETP/equity legs, pulled from yfinance like the rest of the harness but with
+# period="max" — full available history is the point of this sleeve, not the
+# 10y window the frozen daily data uses.
+SHORTVOL_EQUITY_UNIVERSE = ["SVXY", "VXX", "SPY"]
+# Index legs come from CBOE's free published histories, not yfinance: full
+# depth (VIX from 1990-01-02, VIX3M from 2009-09-18 — the CBOE file starts
+# there, not at the index's 2007 launch; verified 2026-07-29). Stored WITHOUT
+# the caret ("VIX", not "^VIX") to keep them visibly distinct from the
+# yfinance-sourced ^VIX in the frozen data/1d.
+SHORTVOL_CBOE_URLS = {
+    "VIX": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+    "VIX3M": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv",
+}
+# NYSE sessions genuinely absent from CBOE's published VIX history (verified
+# against the raw file 2026-07-29: each date is missing while its adjacent
+# sessions are present — a quirk of the CBOE file, not a parse error). The
+# cross-check treats these as expected; any OTHER index gap vs SPY trading
+# days is a hard failure.
+CBOE_KNOWN_MISSING_DAYS = {"1997-01-31", "1997-11-26", "1999-12-31"}
+# SVXY changed target leverage from -1x to -0.5x effective 2018-02-27 (the
+# post-Volmageddon prospectus change). Pre/post are DIFFERENT INSTRUMENTS
+# sharing a ticker; any backtest whose window crosses this date must treat the
+# two regimes separately, never as one continuous -0.5x series.
+SVXY_LEVERAGE_CHANGE_DATE = "2018-02-27"
+# VXX coverage: the original ETN (series A, inception 2009-01-30) matured
+# 2019-01-30; the current VXX is series B (launched Jan 2018 as VXXB, renamed
+# VXX in 2019). yfinance "VXX" carries series B ONLY, split-adjusted across
+# its 1:4 reverse splits (verified: history begins 2018-01-25 and the largest
+# daily moves are genuine vol spikes, not ~75% split artifacts). The 2009-2018
+# series-A history is NOT available under this ticker; if pre-2018 short-vol
+# ETN history is ever needed it must come from another source.
+VXX_HISTORY_START = "2018-01-25"
+
 # ── Sealed out-of-sample windows (Phase 5 L11) ──────────────────────────
 # NEVER pass these ranges to a development run. The runner takes an explicit
 # [start, end]; each sealed slice is read exactly once, deliberately, via

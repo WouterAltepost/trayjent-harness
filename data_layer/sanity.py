@@ -31,6 +31,12 @@ _GAP_DAYS = {
     "1d": 7,
     "1h": 4,
     "30m": 4,
+    # Shortvol sleeve (data/shortvol): daily series, same holiday tolerance as
+    # 1d. Deliberately NO _ROW_BANDS entry — the sleeve's series lengths range
+    # ~1.9k rows (VXX, series B only) to ~9.2k (VIX since 1990), so one band
+    # fits none; scripts/pull_shortvol_data.py prints exact per-series
+    # coverage instead.
+    "shortvol": 7,
 }
 
 
