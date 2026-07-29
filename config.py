@@ -246,6 +246,15 @@ ROTOR_EXCLUDED = {"PAXG"}
 # The listing windows are DERIVED from the stored bars
 # (data_layer.rotor.listing_windows) so the map can never drift from data.
 ROTOR_DELISTED = ("ALGO", "MATIC", "MKR", "NEAR", "TRX")
+# Rotor backtest cost model, applied per side on every fill (weekly
+# rebalance trades, forced delist/gap exits): tier-1 taker fee (above) plus
+# this slippage allowance.
+ROTOR_SLIPPAGE_BPS = 10.0
+# Tuning window. A given cell's equity curve starts LATER than this — at the
+# first weekly rebalance where its BTC gate MA is fully formed (BTC data
+# starts 2021-01-01, so a 200d gate forms ~2021-07); the tuning script
+# reports each cell's actual start date.
+ROTOR_TUNING = ("2021-01-01", "2024-12-31")
 # SURVIVORSHIP BIAS, stated honestly: the universe is Alpaca's CURRENT list,
 # so coins they delisted are excluded from any backtest built on this data.
 # That is a KNOWN UPWARD BIAS on historical performance. Accepted for v1
@@ -283,7 +292,14 @@ ROTOR_ALPACA_CRYPTO_FEES = {"taker": 0.0025, "maker": 0.0015}
 #                           START-anchored and covers all data ever pulled
 #                           after it. calm.backtest.build_inputs fails closed
 #                           on any window touching it.
+#   Rotor (crypto, daily/weekly): EVERYTHING from 2025-01-01 onward is
+#                           sealed — registered before any Rotor backtest
+#                           code existed. Start-anchored like OOS_SHORTVOL
+#                           (the end date is only the data horizon at
+#                           sealing); rotor.backtest.build_inputs fails
+#                           closed on any window touching it.
 OOS_STEADY = ("2020-01-01", "2021-12-31")
 OOS_STEADY_2016 = ("2016-01-01", "2019-12-31")
 OOS_PULSE_HOURLY = ("2026-04-01", "2026-06-24")
 OOS_SHORTVOL = ("2022-01-01", "2026-07-29")
+OOS_ROTOR = ("2025-01-01", "2026-07-29")
