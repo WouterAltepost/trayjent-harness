@@ -193,6 +193,14 @@ SVXY_LEVERAGE_CHANGE_DATE = "2018-02-27"
 # ETN history is ever needed it must come from another source.
 VXX_HISTORY_START = "2018-01-25"
 
+# ── Calm (shortvol sleeve) backtest inputs ──────────────────────────────
+# Cost model: bps per side on EVERY fill — entry, exit, and the daily
+# resize while long. A deliberate backtest input, not a live mirror.
+CALM_COST_BPS_PER_SIDE = 5.0
+# Tuning window: SVXY inception through the last session before the sealed
+# OOS start (OOS_SHORTVOL below). ALL parameter selection happens here.
+CALM_TUNING = ("2011-10-04", "2021-12-31")
+
 # ── Sealed out-of-sample windows (Phase 5 L11) ──────────────────────────
 # NEVER pass these ranges to a development run. The runner takes an explicit
 # [start, end]; each sealed slice is read exactly once, deliberately, via
@@ -204,6 +212,16 @@ VXX_HISTORY_START = "2018-01-25"
 # Pulse-30min is mechanical fidelity only (≈60d, overlaps the hourly quarter
 # by nature) — do not tune any strategy parameter from it, and keep the hourly
 # OOS quarter untouched.
+#   Calm (shortvol, daily): EVERYTHING from 2022-01-01 onward is sealed —
+#                           registered at sleeve creation (2026-07-29) before
+#                           any strategy metric was computed on it, so the
+#                           2022 bear and the 2024-08 / 2025-04 vol spikes
+#                           stay a clean validation set. The end date below is
+#                           only the data horizon at sealing: the seal is
+#                           START-anchored and covers all data ever pulled
+#                           after it. calm.backtest.build_inputs fails closed
+#                           on any window touching it.
 OOS_STEADY = ("2020-01-01", "2021-12-31")
 OOS_STEADY_2016 = ("2016-01-01", "2019-12-31")
 OOS_PULSE_HOURLY = ("2026-04-01", "2026-06-24")
+OOS_SHORTVOL = ("2022-01-01", "2026-07-29")

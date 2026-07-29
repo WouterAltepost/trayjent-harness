@@ -4,4 +4,5 @@ pandas>=2.0
 pyarrow>=14.0          # Parquet storage for bars
 numpy>=1.24
 anthropic>=0.39        # scoring, Phase 4 (cache-backed)
+matplotlib>=3.8        # Calm tuning equity plot (scripts/backtest_shortvol_tuning.py)
 pytest>=8.0
